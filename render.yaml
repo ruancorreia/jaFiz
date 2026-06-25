@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: jafiz
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    disk:
+      name: jafiz-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
