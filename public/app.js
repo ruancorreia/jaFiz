@@ -6,15 +6,23 @@ const weekdays = [
   ["wed", "Qua"],
   ["thu", "Qui"],
   ["fri", "Sex"],
-  ["sat", "Sab"]
+  ["sat", "Sáb"]
 ];
 const iconMap = {
-  poop: "🧹",
-  food: "🥣",
-  sparkles: "✨",
-  dish: "🍽️",
-  moon: "🌙",
-  star: "⭐"
+  poop: "\u{1F9F9}",
+  food: "\u{1F963}",
+  sparkles: "\u2728",
+  dish: "\u{1F37D}\uFE0F",
+  moon: "\u{1F319}",
+  star: "\u2B50"
+};
+const iconLabels = {
+  star: "Estrela",
+  food: "Comida",
+  sparkles: "Brilho",
+  dish: "Louça",
+  moon: "Noite",
+  poop: "Limpeza"
 };
 let state = { view: "dashboard", data: null, me: null };
 
@@ -65,16 +73,16 @@ async function renderLogin() {
           <div class="brand">JaFiz</div>
           <div>
             <h1>Tarefa feita vira conquista.</h1>
-            <p>Mesada clara, combinados visiveis e aprovacao dos responsaveis no mesmo lugar.</p>
+            <p>Mesada clara, combinados visíveis e aprovação dos responsáveis no mesmo lugar.</p>
           </div>
         </div>
         <form class="login-form">
           <div>
             <h2>Entrar</h2>
-            <p class="page-title p">Escolha seu nome. No primeiro acesso voce cria sua senha.</p>
+            <p class="page-title p">Escolha seu nome. No primeiro acesso você cria sua senha.</p>
           </div>
           <label class="field">
-            <span>Usuario</span>
+            <span>Usuário</span>
             <select name="name"></select>
           </label>
           <label class="field password-field">
@@ -131,7 +139,7 @@ function completionFor(taskId, date = today()) {
 }
 
 function statusText(status) {
-  return { pending: "Aguardando", approved: "Aprovada", rejected: "Nao valeu" }[status] || "Aberta";
+  return { pending: "Aguardando", approved: "Aprovada", rejected: "Não valeu" }[status] || "Aberta";
 }
 
 function renderChild() {
@@ -148,7 +156,7 @@ function renderChild() {
       <section class="child-hero">
         <div>
           <h1>Oi, ${escapeHtml(child.name)}!</h1>
-          <p>Marque as tarefas antes do horario limite. Depois um responsavel confere e aprova.</p>
+          <p>Marque as tarefas antes do horário limite. Depois um responsável confere e aprova.</p>
         </div>
         <div class="score-grid">
           <div class="score"><span>Mesada prevista</span><strong>${money(summary.remaining)}</strong></div>
@@ -175,12 +183,12 @@ function renderChildTask(task) {
         <div class="task-icon">${iconMap[task.icon] || iconMap.star}</div>
         <h3>${escapeHtml(task.title)}</h3>
         <div class="task-meta">
-          <span class="pill">Ate ${task.dueTime}</span>
+          <span class="pill">Até ${task.dueTime}</span>
           <span class="pill">${money(task.value)}</span>
-          <span class="pill ${completion ? `status-${completion.status}` : ""}">${completion ? statusText(completion.status) : late ? "Passou do horario" : "Aberta"}</span>
+          <span class="pill ${completion ? `status-${completion.status}` : ""}">${completion ? statusText(completion.status) : late ? "Passou do horário" : "Aberta"}</span>
         </div>
       </div>
-      <button class="primary" type="button" ${completion || late ? "disabled" : ""}>Ja fiz</button>
+      <button class="primary" type="button" ${completion || late ? "disabled" : ""}>Já fiz</button>
     </article>
   `);
   card.querySelector("button").addEventListener("click", async () => {
@@ -202,15 +210,15 @@ function renderResponsible() {
     <main class="layout">
       <aside class="sidebar">
         <div class="brand">JaFiz</div>
-        <button class="nav-button active" data-view="dashboard">🏠 Painel</button>
-        <button class="nav-button" data-view="tasks">✅ Tarefas</button>
-        <button class="nav-button" data-view="family">👥 Familia</button>
-        <button class="nav-button logout">↩ Sair</button>
+        <button class="nav-button active" data-view="dashboard">Painel</button>
+        <button class="nav-button" data-view="tasks">Tarefas</button>
+        <button class="nav-button" data-view="family">Família</button>
+        <button class="nav-button logout">Sair</button>
       </aside>
       <section class="main">
         <div class="topbar">
           <div class="page-title">
-            <h1>Painel dos responsaveis</h1>
+            <h1>Painel dos responsáveis</h1>
             <p>Hoje: ${new Date().toLocaleDateString("pt-BR")}</p>
           </div>
           <div class="row-actions">
@@ -249,17 +257,16 @@ function renderResponsibleContent(container) {
 }
 
 function renderDashboardView(container) {
-  const pending = state.data.completions.filter((item) => item.status === "pending");
   container.innerHTML = `
     <div class="workspace">
       <section class="table-wrap">
         <table>
-          <thead><tr><th></th><th>Crianca</th><th>Tarefa</th><th>Dia</th><th>Status</th><th>Acoes</th></tr></thead>
+          <thead><tr><th></th><th>Criança</th><th>Tarefa</th><th>Dia</th><th>Status</th><th>Ações</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
       <section class="panel">
-        <h2>Resumo do mes</h2>
+        <h2>Resumo do mês</h2>
         ${state.data.children.map((child) => `
           <p><strong>${escapeHtml(child.name)}</strong></p>
           <p>Mesada: ${money(child.summary.allowance)}</p>
@@ -275,7 +282,7 @@ function renderDashboardView(container) {
     tbody.innerHTML = `<tr><td colspan="6"><div class="empty">Nenhuma tarefa marcada ainda.</div></td></tr>`;
     return;
   }
-  rows.forEach((completion) => tbody.appendChild(completionRow(completion, pending)));
+  rows.forEach((completion) => tbody.appendChild(completionRow(completion)));
 }
 
 function completionRow(completion) {
@@ -300,92 +307,132 @@ function completionRow(completion) {
 }
 
 function renderTasksView(container) {
-  const child = state.data.children[0];
   container.innerHTML = `
     <div class="workspace">
       <section class="table-wrap">
         <table>
-          <thead><tr><th>Tarefa</th><th>Crianca</th><th>Dias</th><th>Limite</th><th>Valor</th><th>Ativa</th></tr></thead>
+          <thead><tr><th>Tarefa</th><th>Criança</th><th>Dias</th><th>Limite</th><th>Valor</th><th>Ativa</th><th>Ações</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
       <section class="panel">
-        <h2>Nova tarefa</h2>
+        <h2 class="task-form-title">Nova tarefa</h2>
         <form class="task-form">
-          <label class="field full"><span>Crianca</span><select name="childId">${state.data.children.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></label>
-          <label class="field full"><span>Titulo</span><input name="title" required placeholder="Ex: Guardar mochila"></label>
+          <input name="taskId" type="hidden">
+          <label class="field full"><span>Criança</span><select name="childId">${state.data.children.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></label>
+          <label class="field full"><span>Título</span><input name="title" required placeholder="Ex: Guardar mochila"></label>
           <div class="form-grid">
-            <label class="field"><span>Horario limite</span><input name="dueTime" type="time" value="21:00" required></label>
-            <label class="field"><span>Icone</span><select name="icon"><option value="star">Estrela</option><option value="food">Comida</option><option value="sparkles">Brilho</option><option value="dish">Louca</option><option value="moon">Noite</option><option value="poop">Limpeza</option></select></label>
+            <label class="field"><span>Horário limite</span><input name="dueTime" type="time" value="21:00" required></label>
+            <label class="field"><span>Ícone</span><select name="icon">${Object.entries(iconLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label>
           </div>
           <label class="field full">
             <span>Dias</span>
             <div class="row-actions">
-              <button class="ghost preset-weekdays" type="button">Dias uteis</button>
+              <button class="ghost preset-weekdays" type="button">Dias úteis</button>
               <button class="ghost preset-all" type="button">Todos</button>
-              <button class="ghost preset-clear" type="button">Especificos</button>
+              <button class="ghost preset-clear" type="button">Específicos</button>
             </div>
             <div class="days-grid">${weekdays.map(([key, label]) => `<button class="day-toggle" type="button" data-day="${key}">${label}</button>`).join("")}</div>
           </label>
-          <button class="primary" type="submit">Criar tarefa</button>
+          <label class="field full task-active" hidden>
+            <span>Status</span>
+            <select name="active">
+              <option value="true">Ativa</option>
+              <option value="false">Inativa</option>
+            </select>
+          </label>
+          <div class="row-actions">
+            <button class="primary task-submit" type="submit">Criar tarefa</button>
+            <button class="ghost task-cancel" type="button" hidden>Cancelar edição</button>
+          </div>
         </form>
       </section>
     </div>
   `;
   const tbody = container.querySelector("tbody");
+  const form = container.querySelector(".task-form");
+  const selectedDays = new Set(["mon", "tue", "wed", "thu", "fri"]);
+  const syncDayButtons = () => form.querySelectorAll(".day-toggle").forEach((button) => {
+    button.classList.toggle("active", selectedDays.has(button.dataset.day));
+  });
+  const setSelectedDays = (days) => {
+    selectedDays.clear();
+    days.forEach((day) => selectedDays.add(day));
+    syncDayButtons();
+  };
+  const resetTaskForm = () => {
+    form.reset();
+    form.taskId.value = "";
+    form.childId.disabled = false;
+    form.active.value = "true";
+    setSelectedDays(["mon", "tue", "wed", "thu", "fri"]);
+    container.querySelector(".task-form-title").textContent = "Nova tarefa";
+    container.querySelector(".task-submit").textContent = "Criar tarefa";
+    container.querySelector(".task-cancel").hidden = true;
+    container.querySelector(".task-active").hidden = true;
+  };
+
   state.data.tasks.forEach((task) => {
     const owner = state.data.children.find((item) => item.id === task.childId);
-    tbody.appendChild(el(`
+    const row = el(`
       <tr>
         <td>${escapeHtml(task.title)}</td>
         <td>${escapeHtml(owner?.name || "-")}</td>
         <td>${task.days.map((day) => weekdays.find(([key]) => key === day)?.[1]).join(", ")}</td>
         <td>${task.dueTime}</td>
         <td>${money(task.value)}</td>
-        <td><span class="pill">${task.active ? "Sim" : "Nao"}</span></td>
+        <td><span class="pill">${task.active ? "Sim" : "Não"}</span></td>
+        <td><button class="secondary edit-task" type="button">Editar</button></td>
       </tr>
-    `));
+    `);
+    row.querySelector(".edit-task").addEventListener("click", () => {
+      form.taskId.value = task.id;
+      form.childId.value = task.childId;
+      form.childId.disabled = true;
+      form.title.value = task.title;
+      form.dueTime.value = task.dueTime;
+      form.icon.value = task.icon || "star";
+      form.active.value = String(task.active);
+      setSelectedDays(task.days);
+      container.querySelector(".task-form-title").textContent = "Editar tarefa";
+      container.querySelector(".task-submit").textContent = "Salvar alterações";
+      container.querySelector(".task-cancel").hidden = false;
+      container.querySelector(".task-active").hidden = false;
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    tbody.appendChild(row);
   });
-  const form = container.querySelector(".task-form");
-  const selectedDays = new Set(["mon", "tue", "wed", "thu", "fri"]);
-  const syncDayButtons = () => form.querySelectorAll(".day-toggle").forEach((button) => {
-    button.classList.toggle("active", selectedDays.has(button.dataset.day));
-  });
+
   form.querySelectorAll(".day-toggle").forEach((button) => {
-    syncDayButtons();
     button.addEventListener("click", () => {
       if (selectedDays.has(button.dataset.day)) selectedDays.delete(button.dataset.day);
       else selectedDays.add(button.dataset.day);
       syncDayButtons();
     });
   });
-  form.querySelector(".preset-weekdays").addEventListener("click", () => {
-    selectedDays.clear();
-    ["mon", "tue", "wed", "thu", "fri"].forEach((day) => selectedDays.add(day));
-    syncDayButtons();
-  });
-  form.querySelector(".preset-all").addEventListener("click", () => {
-    selectedDays.clear();
-    weekdays.forEach(([day]) => selectedDays.add(day));
-    syncDayButtons();
-  });
-  form.querySelector(".preset-clear").addEventListener("click", () => {
-    selectedDays.clear();
-    syncDayButtons();
-  });
+  form.querySelector(".preset-weekdays").addEventListener("click", () => setSelectedDays(["mon", "tue", "wed", "thu", "fri"]));
+  form.querySelector(".preset-all").addEventListener("click", () => setSelectedDays(weekdays.map(([day]) => day)));
+  form.querySelector(".preset-clear").addEventListener("click", () => setSelectedDays([]));
+  form.querySelector(".task-cancel").addEventListener("click", resetTaskForm);
+  resetTaskForm();
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(form);
+    const taskId = form.taskId.value;
+    const payload = {
+      title: data.get("title"),
+      dueTime: data.get("dueTime"),
+      icon: data.get("icon"),
+      days: [...selectedDays]
+    };
+    if (taskId) payload.active = data.get("active") === "true";
+    else payload.childId = form.childId.value;
+
     try {
-      await api("/api/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          childId: data.get("childId"),
-          title: data.get("title"),
-          dueTime: data.get("dueTime"),
-          icon: data.get("icon"),
-          days: [...selectedDays]
-        })
+      await api(taskId ? `/api/tasks/${taskId}` : "/api/tasks", {
+        method: taskId ? "PUT" : "POST",
+        body: JSON.stringify(payload)
       });
       await loadApp();
       state.view = "tasks";
@@ -400,7 +447,7 @@ function renderFamilyView(container) {
   container.innerHTML = `
     <div class="workspace">
       <section class="panel">
-        <h2>Criancas</h2>
+        <h2>Crianças</h2>
         ${state.data.children.map((child) => `
           <form class="child-settings" data-id="${child.id}">
             <p><strong>${escapeHtml(child.name)}</strong></p>
@@ -413,7 +460,7 @@ function renderFamilyView(container) {
         `).join("<hr>")}
       </section>
       <section class="panel">
-        <h2>Adicionar crianca</h2>
+        <h2>Adicionar criança</h2>
         <form class="new-child">
           <label class="field"><span>Nome</span><input name="name" required></label>
           <label class="field"><span>Mesada</span><input name="allowance" type="number" min="0" step="0.01" value="50"></label>

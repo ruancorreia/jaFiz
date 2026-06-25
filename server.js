@@ -12,11 +12,12 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const APP_TIME_ZONE = "America/Sao_Paulo";
 
 const weekdayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-const responsibleNames = ["Ruan", "Ana Carla"];
-
 function ensureDb() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (fs.existsSync(DB_FILE)) return;
+  if (fs.existsSync(DB_FILE)) {
+    migrateDbText();
+    return;
+  }
 
   const now = new Date().toISOString();
   const initial = {
@@ -35,11 +36,11 @@ function ensureDb() {
   initial.childrenSettings.push({ childId: lara.id, allowance: 50, currency: "BRL" });
   const defaults = [
     ["Limpar coco da Lola do quintal", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "20:00", "poop"],
-    ["Colocar racao pra Lola - manha", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "09:00", "food"],
-    ["Colocar racao pra Lola - noite", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "19:00", "food"],
+    ["Colocar ração para a Lola - manhã", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "09:00", "food"],
+    ["Colocar ração para a Lola - noite", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "19:00", "food"],
     ["Trocar os tapetes de xixi da Lola", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "20:00", "sparkles"],
-    ["Lavar a louca", "weekdays", ["mon", "tue", "wed", "thu", "fri"], "21:00", "dish"],
-    ["Nao usar celular apos 21h e antes de 6h", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "21:00", "moon"]
+    ["Lavar a louça", "weekdays", ["mon", "tue", "wed", "thu", "fri"], "21:00", "dish"],
+    ["Não usar celular após 21h e antes de 6h", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "21:00", "moon"]
   ];
   initial.tasks = defaults.map(([title, scheduleType, days, dueTime, icon]) => ({
     id: id("tsk"),
@@ -54,6 +55,24 @@ function ensureDb() {
   }));
 
   writeDb(initial);
+}
+
+function migrateDbText() {
+  const db = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+  const taskTitleMap = new Map([
+    ["Colocar racao pra Lola - manha", "Colocar ração para a Lola - manhã"],
+    ["Colocar racao pra Lola - noite", "Colocar ração para a Lola - noite"],
+    ["Lavar a louca", "Lavar a louça"],
+    ["Nao usar celular apos 21h e antes de 6h", "Não usar celular após 21h e antes de 6h"]
+  ]);
+  let changed = false;
+  db.tasks.forEach((task) => {
+    if (taskTitleMap.has(task.title)) {
+      task.title = taskTitleMap.get(task.title);
+      changed = true;
+    }
+  });
+  if (changed) writeDb(db);
 }
 
 function readDb() {
@@ -108,7 +127,7 @@ function readBody(req) {
       try {
         resolve(body ? JSON.parse(body) : {});
       } catch {
-        reject(new Error("JSON invalido."));
+        reject(new Error("JSON inválido."));
       }
     });
   });
@@ -129,7 +148,7 @@ function getSessionUser(req, db) {
 
 function requireUser(req, res, db) {
   const user = getSessionUser(req, db);
-  if (!user) sendJson(res, 401, { error: "Login necessario." });
+  if (!user) sendJson(res, 401, { error: "Login necessário." });
   return user;
 }
 
@@ -137,7 +156,7 @@ function requireResponsible(req, res, db) {
   const user = requireUser(req, res, db);
   if (!user) return null;
   if (user.role !== "responsible") {
-    sendJson(res, 403, { error: "Apenas responsaveis podem fazer isso." });
+    sendJson(res, 403, { error: "Apenas responsáveis podem fazer isso." });
     return null;
   }
   return user;
@@ -296,7 +315,7 @@ async function routeApi(req, res) {
       const password = String(body.password || "");
       const nextPassword = String(body.nextPassword || "");
       const user = db.users.find((item) => item.name.toLowerCase() === name.toLowerCase());
-      if (!user) return sendJson(res, 404, { error: "Usuario nao encontrado." });
+      if (!user) return sendJson(res, 404, { error: "Usuário não encontrado." });
       if (!password && user.passwordHash) return sendJson(res, 400, { error: "Informe sua senha." });
       if (!user.passwordHash) {
         if (nextPassword.length < 4) return sendJson(res, 400, { error: "Crie uma senha com pelo menos 4 caracteres." });
@@ -346,17 +365,17 @@ async function routeApi(req, res) {
       const body = await readBody(req);
       const date = body.date || isoDateLocal();
       const task = db.tasks.find((item) => item.id === body.taskId && item.active);
-      if (!task) return sendJson(res, 404, { error: "Tarefa nao encontrada." });
-      if (user.role !== "child" || user.id !== task.childId) return sendJson(res, 403, { error: "Essa tarefa pertence a outra crianca." });
-      if (!isTaskScheduledOn(task, date)) return sendJson(res, 400, { error: "Essa tarefa nao existe nesse dia." });
+      if (!task) return sendJson(res, 404, { error: "Tarefa não encontrada." });
+      if (user.role !== "child" || user.id !== task.childId) return sendJson(res, 403, { error: "Essa tarefa pertence a outra criança." });
+      if (!isTaskScheduledOn(task, date)) return sendJson(res, 400, { error: "Essa tarefa não existe nesse dia." });
       const now = new Date();
       const currentMinutes = currentMinutesLocal(now);
       const [dueHour, dueMinute] = task.dueTime.split(":").map(Number);
       if (date !== isoDateLocal() || currentMinutes > dueHour * 60 + dueMinute) {
-        return sendJson(res, 400, { error: "O horario limite passou. Peça para um responsavel avaliar." });
+        return sendJson(res, 400, { error: "O horário limite passou. Peça para um responsável avaliar." });
       }
       const existing = db.completions.find((item) => item.taskId === task.id && item.date === date);
-      if (existing && existing.status !== "rejected") return sendJson(res, 409, { error: "Tarefa ja marcada." });
+      if (existing && existing.status !== "rejected") return sendJson(res, 409, { error: "Tarefa já marcada." });
       const completion = existing || { id: id("cmp"), taskId: task.id, childId: user.id, date };
       completion.status = "pending";
       completion.completedAt = now.toISOString();
@@ -372,11 +391,11 @@ async function routeApi(req, res) {
       if (!responsible) return;
       const body = await readBody(req);
       const child = db.users.find((item) => item.id === body.childId && item.role === "child");
-      if (!child) return sendJson(res, 400, { error: "Crianca invalida." });
+      if (!child) return sendJson(res, 400, { error: "Criança inválida." });
       const title = String(body.title || "").trim();
       const dueTime = String(body.dueTime || "21:00");
       const days = Array.isArray(body.days) ? body.days.filter((day) => weekdayKeys.includes(day)) : [];
-      if (title.length < 3 || !days.length || !/^\d{2}:\d{2}$/.test(dueTime)) return sendJson(res, 400, { error: "Preencha titulo, dias e horario." });
+      if (title.length < 3 || !days.length || !/^\d{2}:\d{2}$/.test(dueTime)) return sendJson(res, 400, { error: "Preencha título, dias e horário." });
       const task = {
         id: id("tsk"),
         childId: child.id,
@@ -397,7 +416,7 @@ async function routeApi(req, res) {
       const responsible = requireResponsible(req, res, db);
       if (!responsible) return;
       const task = db.tasks.find((item) => item.id === pathName.split("/").pop());
-      if (!task) return sendJson(res, 404, { error: "Tarefa nao encontrada." });
+      if (!task) return sendJson(res, 404, { error: "Tarefa não encontrada." });
       const body = await readBody(req);
       if (body.title !== undefined) task.title = String(body.title).trim();
       if (body.dueTime !== undefined && /^\d{2}:\d{2}$/.test(body.dueTime)) task.dueTime = body.dueTime;
@@ -413,8 +432,8 @@ async function routeApi(req, res) {
       if (!responsible) return;
       const body = await readBody(req);
       const name = normalizeName(body.name);
-      if (name.length < 2) return sendJson(res, 400, { error: "Nome invalido." });
-      if (db.users.some((item) => item.name.toLowerCase() === name.toLowerCase())) return sendJson(res, 409, { error: "Ja existe usuario com esse nome." });
+      if (name.length < 2) return sendJson(res, 400, { error: "Nome inválido." });
+      if (db.users.some((item) => item.name.toLowerCase() === name.toLowerCase())) return sendJson(res, 409, { error: "Já existe usuário com esse nome." });
       const child = { id: id("usr"), name, role: "child", passwordHash: null, createdAt: new Date().toISOString() };
       db.users.push(child);
       db.childrenSettings.push({ childId: child.id, allowance: Number(body.allowance || 50), currency: "BRL" });
@@ -427,7 +446,7 @@ async function routeApi(req, res) {
       if (!responsible) return;
       const childId = pathName.split("/")[3];
       const child = db.users.find((item) => item.id === childId && item.role === "child");
-      if (!child) return sendJson(res, 404, { error: "Crianca nao encontrada." });
+      if (!child) return sendJson(res, 404, { error: "Criança não encontrada." });
       const body = await readBody(req);
       let setting = db.childrenSettings.find((item) => item.childId === childId);
       if (!setting) {
@@ -445,7 +464,7 @@ async function routeApi(req, res) {
       const body = await readBody(req);
       const user = db.users.find((item) => item.id === body.userId);
       const password = String(body.password || "");
-      if (!user || password.length < 4) return sendJson(res, 400, { error: "Usuario ou senha invalida." });
+      if (!user || password.length < 4) return sendJson(res, 400, { error: "Usuário ou senha inválida." });
       user.passwordHash = hashPassword(password);
       db.sessions = db.sessions.filter((session) => session.userId !== user.id);
       writeDb(db);
@@ -472,7 +491,7 @@ async function routeApi(req, res) {
       return sendJson(res, 200, { completions: changed });
     }
 
-    return sendJson(res, 404, { error: "Rota nao encontrada." });
+    return sendJson(res, 404, { error: "Rota não encontrada." });
   } catch (error) {
     return sendJson(res, 500, { error: error.message || "Erro inesperado." });
   }
