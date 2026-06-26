@@ -344,6 +344,7 @@ function renderResponsible() {
     </main>
   `);
   shell.querySelectorAll(".nav-button[data-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === state.view);
     button.addEventListener("click", () => {
       state.view = button.dataset.view;
       shell.querySelectorAll(".nav-button[data-view]").forEach((item) => item.classList.toggle("active", item === button));
@@ -440,13 +441,13 @@ function completionRow(completion) {
   const penalty = Number(completion.penaltyAmount || 0);
   const row = el(`
     <tr>
-      <td><input type="checkbox" data-id="${completion.id}" ${completion.status === "pending" ? "" : "disabled"}></td>
-      <td>${escapeHtml(child?.name || "-")}</td>
-      <td>${escapeHtml(task?.title || "-")}</td>
-      <td>${completion.date.split("-").reverse().join("/")}</td>
-      <td><span class="pill status-${completion.status}">${statusText(completion.status)}</span></td>
-      <td>${penalty ? `${money(penalty)}${completion.violationMinutes ? ` (${completion.violationMinutes} min)` : ""}` : "-"}</td>
-      <td class="row-actions">
+      <td data-label="Selecionar"><input type="checkbox" data-id="${completion.id}" ${completion.status === "pending" ? "" : "disabled"}></td>
+      <td data-label="Criança">${escapeHtml(child?.name || "-")}</td>
+      <td data-label="Tarefa">${escapeHtml(task?.title || "-")}</td>
+      <td data-label="Dia">${completion.date.split("-").reverse().join("/")}</td>
+      <td data-label="Status"><span class="pill status-${completion.status}">${statusText(completion.status)}</span></td>
+      <td data-label="Desconto">${penalty ? `${money(penalty)}${completion.violationMinutes ? ` (${completion.violationMinutes} min)` : ""}` : "-"}</td>
+      <td data-label="Ações" class="row-actions">
         <button class="secondary approve" ${completion.status !== "pending" ? "disabled" : ""}>Aprovar</button>
         <button class="danger reject" ${completion.status !== "pending" ? "disabled" : ""}>Rejeitar</button>
       </td>
@@ -698,13 +699,13 @@ function renderTasksView(container) {
     const owner = state.data.children.find((item) => item.id === task.childId);
     const row = el(`
       <tr>
-        <td>${escapeHtml(task.title)}</td>
-        <td>${escapeHtml(owner?.name || "-")}</td>
-        <td>${task.days.map((day) => weekdays.find(([key]) => key === day)?.[1]).join(", ")}</td>
-        <td>${task.dueTime}</td>
-        <td>${money(task.value)}</td>
-        <td><span class="pill">${task.active ? "Sim" : "Não"}</span></td>
-        <td><button class="secondary edit-task" type="button">Editar</button></td>
+        <td data-label="Tarefa">${escapeHtml(task.title)}</td>
+        <td data-label="Criança">${escapeHtml(owner?.name || "-")}</td>
+        <td data-label="Dias">${task.days.map((day) => weekdays.find(([key]) => key === day)?.[1]).join(", ")}</td>
+        <td data-label="Limite">${task.dueTime}</td>
+        <td data-label="Valor">${money(task.value)}</td>
+        <td data-label="Ativa"><span class="pill">${task.active ? "Sim" : "Não"}</span></td>
+        <td data-label="Ações"><button class="secondary edit-task" type="button">Editar</button></td>
       </tr>
     `);
     row.querySelector(".edit-task").addEventListener("click", () => {
