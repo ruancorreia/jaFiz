@@ -2,23 +2,27 @@ const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const { Pool } = require("pg");
 const { URL } = require("url");
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const APP_TIME_ZONE = "America/Sao_Paulo";
+const DEFAULT_PHONE_PENALTY_PER_10_MINUTES = 1;
+const PHONE_RULE_MATCH = "celular";
+const STATE_KEY = "main";
+const DATABASE_URL = process.env.DATABASE_URL;
+const pool = DATABASE_URL ? new Pool({
+  connectionString: DATABASE_URL,
+  ssl: DATABASE_URL.includes("localhost") || DATABASE_URL.includes("127.0.0.1") ? false : { rejectUnauthorized: false }
+}) : null;
 
 const weekdayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-function ensureDb() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (fs.existsSync(DB_FILE)) {
-    migrateDbText();
-    return;
-  }
-
+function createInitialDb() {
   const now = new Date().toISOString();
   const initial = {
     users: [
@@ -29,11 +33,18 @@ function ensureDb() {
     childrenSettings: [],
     tasks: [],
     completions: [],
+    monthClosings: [],
+    auditLog: [],
     sessions: []
   };
 
   const lara = initial.users.find((user) => user.name === "Lara");
-  initial.childrenSettings.push({ childId: lara.id, allowance: 50, currency: "BRL" });
+  initial.childrenSettings.push({
+    childId: lara.id,
+    allowance: 50,
+    currency: "BRL",
+    phonePenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES
+  });
   const defaults = [
     ["Limpar coco da Lola do quintal", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "20:00", "poop"],
     ["Colocar ração para a Lola - manhã", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "09:00", "food"],
@@ -50,11 +61,49 @@ function ensureDb() {
     days,
     dueTime,
     icon,
+    weight: title.toLowerCase().includes(PHONE_RULE_MATCH) ? 2 : 1,
+    requiresChildConfirmation: !title.toLowerCase().includes(PHONE_RULE_MATCH),
     active: true,
     createdAt: now
   }));
 
-  writeDb(initial);
+  return initial;
+}
+
+function ensureDb() {
+  if (pool) return;
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(DB_FILE)) {
+    migrateDbText();
+    return;
+  }
+
+  writeDb(createInitialDb());
+}
+
+async function initStorage() {
+  if (!pool) {
+    ensureDb();
+    return;
+  }
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  const existing = await pool.query("SELECT 1 FROM app_state WHERE key = $1", [STATE_KEY]);
+  if (existing.rowCount) {
+    const db = await readDb();
+    const changed = migrateDbSchema(db) || ensureMonthlyClosings(db);
+    if (changed) await writeDb(db);
+    return;
+  }
+  const seed = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE, "utf8")) : createInitialDb();
+  migrateDbSchema(seed);
+  ensureMonthlyClosings(seed);
+  await writeDb(seed);
 }
 
 function migrateDbText() {
@@ -72,16 +121,49 @@ function migrateDbText() {
       changed = true;
     }
   });
+  changed = migrateDbSchema(db) || changed;
   if (changed) writeDb(db);
 }
 
-function readDb() {
+async function readDb() {
+  if (pool) {
+    const result = await pool.query("SELECT data FROM app_state WHERE key = $1", [STATE_KEY]);
+    if (!result.rowCount) return createInitialDb();
+    const db = result.rows[0].data;
+    const changed = migrateDbSchema(db) || ensureMonthlyClosings(db);
+    if (changed) await writeDb(db);
+    return db;
+  }
   ensureDb();
-  return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+  const db = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+  const changed = migrateDbSchema(db) || ensureMonthlyClosings(db);
+  if (changed) await writeDb(db);
+  return db;
 }
 
-function writeDb(db) {
+async function writeDb(db) {
+  if (pool) {
+    await pool.query(`
+      INSERT INTO app_state (key, data, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (key)
+      DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+    `, [STATE_KEY, JSON.stringify(db)]);
+    return;
+  }
   fs.writeFileSync(DB_FILE, `${JSON.stringify(db, null, 2)}\n`, "utf8");
+}
+
+function addAudit(db, actorId, action, details = {}) {
+  if (!Array.isArray(db.auditLog)) db.auditLog = [];
+  db.auditLog.unshift({
+    id: id("aud"),
+    actorId,
+    action,
+    details,
+    createdAt: new Date().toISOString()
+  });
+  db.auditLog = db.auditLog.slice(0, 500);
 }
 
 function id(prefix) {
@@ -192,6 +274,120 @@ function formatCalendarDate(date) {
   return `${year}-${month}-${day}`;
 }
 
+function daysInMonth(year, monthNumber) {
+  return new Date(year, monthNumber, 0).getDate();
+}
+
+function isLastDayOfLocalMonth(date = new Date()) {
+  const parts = saoPauloParts(date);
+  return Number(parts.day) === daysInMonth(Number(parts.year), Number(parts.month));
+}
+
+function previousMonthKey(month) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const date = new Date(year, monthNumber - 2, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthKeysBetween(startMonth, endMonth) {
+  const keys = [];
+  const [startYear, startNumber] = startMonth.split("-").map(Number);
+  const [endYear, endNumber] = endMonth.split("-").map(Number);
+  const cursor = new Date(startYear, startNumber - 1, 1);
+  const end = new Date(endYear, endNumber - 1, 1);
+  while (cursor <= end) {
+    keys.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return keys;
+}
+
+function isPhoneTask(task) {
+  return String(task.title || "").toLowerCase().includes(PHONE_RULE_MATCH) || task.icon === "moon";
+}
+
+function phonePenaltyFor(setting, minutes) {
+  const blocks = Math.ceil(Math.max(0, Number(minutes || 0)) / 10);
+  return blocks * Number(setting?.phonePenaltyPer10Minutes || DEFAULT_PHONE_PENALTY_PER_10_MINUTES);
+}
+
+function minutesBetweenTimes(startTime, endTime) {
+  if (!/^\d{2}:\d{2}$/.test(String(startTime)) || !/^\d{2}:\d{2}$/.test(String(endTime))) return 0;
+  const [startHour, startMinute] = startTime.split(":").map(Number);
+  const [endHour, endMinute] = endTime.split(":").map(Number);
+  const start = startHour * 60 + startMinute;
+  let end = endHour * 60 + endMinute;
+  if (end < start) end += 24 * 60;
+  return Math.max(0, end - start);
+}
+
+function migrateDbSchema(db) {
+  let changed = false;
+  if (!Array.isArray(db.monthClosings)) {
+    db.monthClosings = [];
+    changed = true;
+  }
+  if (!Array.isArray(db.auditLog)) {
+    db.auditLog = [];
+    changed = true;
+  }
+  db.childrenSettings.forEach((setting) => {
+    if (setting.phonePenaltyPer10Minutes === undefined || setting.phonePenaltyPer10Minutes === 2) {
+      setting.phonePenaltyPer10Minutes = DEFAULT_PHONE_PENALTY_PER_10_MINUTES;
+      changed = true;
+    }
+  });
+  db.tasks.forEach((task) => {
+    const phoneTask = isPhoneTask(task);
+    if (task.weight === undefined) {
+      task.weight = phoneTask ? 2 : 1;
+      changed = true;
+    }
+    if (task.requiresChildConfirmation === undefined) {
+      task.requiresChildConfirmation = !phoneTask;
+      changed = true;
+    }
+  });
+  db.completions.forEach((completion) => {
+    if (completion.penaltyAmount === undefined) {
+      completion.penaltyAmount = 0;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function ensureMonthlyClosings(db) {
+  const today = isoDateLocal();
+  const currentMonth = today.slice(0, 7);
+  const firstTaskMonth = db.tasks.reduce((first, task) => {
+    const month = String(task.createdAt || today).slice(0, 7);
+    return !first || month < first ? month : first;
+  }, null);
+  if (!firstTaskMonth) return false;
+  const lastClosedMonth = isLastDayOfLocalMonth() ? currentMonth : previousMonthKey(currentMonth);
+  if (lastClosedMonth < firstTaskMonth) return false;
+
+  let changed = false;
+  monthKeysBetween(firstTaskMonth, lastClosedMonth).forEach((month) => {
+    db.users.filter((user) => user.role === "child").forEach((child) => {
+      if (db.monthClosings.some((closing) => closing.childId === child.id && closing.month === month)) return;
+      const summary = childSummary(db, child.id, month, { skipClosing: true });
+      db.monthClosings.push({
+        id: id("cls"),
+        childId: child.id,
+        month,
+        allowance: summary.allowance,
+        lost: summary.lost,
+        finalAmount: summary.remaining,
+        closedAt: new Date().toISOString()
+      });
+      changed = true;
+    });
+  });
+  return changed;
+}
+
 function getTaskDatesForMonth(task, year, monthIndex) {
   const dates = [];
   const cursor = new Date(year, monthIndex, 1);
@@ -217,16 +413,20 @@ function taskValueMap(db, childId, month = isoDateLocal().slice(0, 7)) {
   const allowance = Number(settings?.allowance || 0);
   const tasks = db.tasks.filter((task) => task.childId === childId && task.active);
   const totalOccurrences = tasks.reduce((sum, task) => sum + getTaskDatesForMonth(task, year, monthIndex).length, 0);
-  const unitValue = totalOccurrences ? allowance / totalOccurrences : 0;
+  const totalWeight = tasks.reduce((sum, task) => {
+    return sum + getTaskDatesForMonth(task, year, monthIndex).length * Math.max(0, Number(task.weight || 1));
+  }, 0);
+  const unitValue = totalWeight ? allowance / totalWeight : 0;
   return {
     allowance,
     totalOccurrences,
+    totalWeight,
     unitValue,
-    values: Object.fromEntries(tasks.map((task) => [task.id, unitValue]))
+    values: Object.fromEntries(tasks.map((task) => [task.id, unitValue * Math.max(0, Number(task.weight || 1))]))
   };
 }
 
-function childSummary(db, childId, month = isoDateLocal().slice(0, 7)) {
+function expectedEntriesForMonth(db, childId, month) {
   const valueMap = taskValueMap(db, childId, month);
   const tasks = db.tasks.filter((task) => task.childId === childId && task.active);
   const [year, monthNumber] = month.split("-").map(Number);
@@ -236,31 +436,66 @@ function childSummary(db, childId, month = isoDateLocal().slice(0, 7)) {
       expected.push({ taskId: task.id, date, value: valueMap.values[task.id] || 0 });
     });
   });
+  return { valueMap, tasks, expected };
+}
 
-  const today = isoDateLocal();
+function missedEntries(db, childId, month, throughDate = isoDateLocal()) {
+  const { tasks, expected } = expectedEntriesForMonth(db, childId, month);
   const completions = db.completions.filter((item) => item.childId === childId && item.date.startsWith(month));
-  const missed = expected.filter((entry) => {
-    if (entry.date > today) return false;
+  const today = isoDateLocal();
+  return expected.filter((entry) => {
+    if (entry.date > throughDate) return false;
     const task = tasks.find((item) => item.id === entry.taskId);
-    if (entry.date === today && task) {
+    if (entry.date === throughDate && throughDate === today && task) {
       const [dueHour, dueMinute] = task.dueTime.split(":").map(Number);
       if (currentMinutesLocal() <= dueHour * 60 + dueMinute) return false;
     }
     const completion = completions.find((item) => item.taskId === entry.taskId && item.date === entry.date);
+    if (isPhoneTask(task) && !completion) return false;
     return !completion || completion.status === "rejected" || completion.status === "missed";
   });
+}
+
+function progressForMonth(db, childId, month, allowance) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const totalDays = daysInMonth(year, monthNumber);
+  const today = isoDateLocal();
+  const endDay = month === today.slice(0, 7) ? Number(today.slice(8, 10)) : totalDays;
+  const points = [];
+  for (let day = 1; day <= endDay; day += 1) {
+    const date = `${month}-${String(day).padStart(2, "0")}`;
+    const missedValue = missedEntries(db, childId, month, date).reduce((sum, entry) => sum + entry.value, 0);
+    const penalties = db.completions
+      .filter((item) => item.childId === childId && item.date.startsWith(month) && item.date <= date)
+      .reduce((sum, item) => sum + Number(item.penaltyAmount || 0), 0);
+    const lost = missedValue + penalties;
+    points.push({ date, lost, remaining: Math.max(0, allowance - lost) });
+  }
+  return points;
+}
+
+function childSummary(db, childId, month = isoDateLocal().slice(0, 7), options = {}) {
+  const { valueMap } = expectedEntriesForMonth(db, childId, month);
+  const completions = db.completions.filter((item) => item.childId === childId && item.date.startsWith(month));
+  const missed = missedEntries(db, childId, month);
   const approved = completions.filter((item) => item.status === "approved").length;
   const pending = completions.filter((item) => item.status === "pending").length;
-  const lost = missed.reduce((sum, entry) => sum + entry.value, 0);
+  const penaltyLost = completions.reduce((sum, item) => sum + Number(item.penaltyAmount || 0), 0);
+  const lost = missed.reduce((sum, entry) => sum + entry.value, 0) + penaltyLost;
+  const closed = db.monthClosings.find((closing) => closing.childId === childId && closing.month === month);
   return {
     allowance: valueMap.allowance,
     totalOccurrences: valueMap.totalOccurrences,
+    totalWeight: valueMap.totalWeight,
     taskValue: valueMap.unitValue,
     approved,
     pending,
     missed: missed.length,
+    penaltyLost,
     lost,
-    remaining: Math.max(0, valueMap.allowance - lost)
+    remaining: Math.max(0, valueMap.allowance - lost),
+    closed: options.skipClosing ? null : closed || null,
+    progress: progressForMonth(db, childId, month, valueMap.allowance)
   };
 }
 
@@ -300,7 +535,7 @@ function routeStatic(req, res) {
 }
 
 async function routeApi(req, res) {
-  const db = readDb();
+  const db = await readDb();
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathName = url.pathname;
 
@@ -325,7 +560,7 @@ async function routeApi(req, res) {
       }
       const token = id("ses");
       db.sessions.push({ token, userId: user.id, expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString() });
-      writeDb(db);
+      await writeDb(db);
       return sendJson(res, 200, { user: publicUser(user) }, {
         "Set-Cookie": `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}`
       });
@@ -334,7 +569,7 @@ async function routeApi(req, res) {
     if (req.method === "POST" && pathName === "/api/logout") {
       const token = parseCookies(req).session;
       db.sessions = db.sessions.filter((session) => session.token !== token);
-      writeDb(db);
+      await writeDb(db);
       return sendJson(res, 200, { ok: true }, { "Set-Cookie": "session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0" });
     }
 
@@ -351,12 +586,16 @@ async function routeApi(req, res) {
       const month = url.searchParams.get("month") || today.slice(0, 7);
       const children = db.users.filter((item) => item.role === "child").map((child) => ({
         ...publicUser(child),
-        settings: db.childrenSettings.find((setting) => setting.childId === child.id) || { allowance: 0 },
+        settings: db.childrenSettings.find((setting) => setting.childId === child.id) || {
+          allowance: 0,
+          phonePenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES
+        },
         summary: childSummary(db, child.id, month)
       }));
       const tasks = db.tasks.map((task) => ({ ...task, value: taskValueMap(db, task.childId, month).values[task.id] || 0 }));
       const completions = db.completions.filter((item) => item.date.startsWith(month));
-      return sendJson(res, 200, { user: publicUser(user), children, tasks, completions, today, month });
+      const auditLog = user.role === "responsible" ? db.auditLog.slice(0, 30) : [];
+      return sendJson(res, 200, { user: publicUser(user), children, tasks, completions, auditLog, today, month });
     }
 
     if (req.method === "POST" && pathName === "/api/tasks/complete") {
@@ -367,22 +606,27 @@ async function routeApi(req, res) {
       const task = db.tasks.find((item) => item.id === body.taskId && item.active);
       if (!task) return sendJson(res, 404, { error: "Tarefa não encontrada." });
       if (user.role !== "child" || user.id !== task.childId) return sendJson(res, 403, { error: "Essa tarefa pertence a outra criança." });
+      if (isPhoneTask(task)) return sendJson(res, 403, { error: "Essa regra deve ser avaliada por um responsável." });
       if (!isTaskScheduledOn(task, date)) return sendJson(res, 400, { error: "Essa tarefa não existe nesse dia." });
       const now = new Date();
       const currentMinutes = currentMinutesLocal(now);
       const [dueHour, dueMinute] = task.dueTime.split(":").map(Number);
-      if (date !== isoDateLocal() || currentMinutes > dueHour * 60 + dueMinute) {
+      const dueMinutes = dueHour * 60 + dueMinute;
+      const lateMinutes = Math.max(0, currentMinutes - dueMinutes);
+      if (date !== isoDateLocal() || lateMinutes > 120) {
         return sendJson(res, 400, { error: "O horário limite passou. Peça para um responsável avaliar." });
       }
       const existing = db.completions.find((item) => item.taskId === task.id && item.date === date);
       if (existing && existing.status !== "rejected") return sendJson(res, 409, { error: "Tarefa já marcada." });
       const completion = existing || { id: id("cmp"), taskId: task.id, childId: user.id, date };
       completion.status = "pending";
+      completion.completedLate = lateMinutes > 0;
+      completion.lateMinutes = lateMinutes;
       completion.completedAt = now.toISOString();
       completion.approvedAt = null;
       completion.approvedBy = null;
       if (!existing) db.completions.push(completion);
-      writeDb(db);
+      await writeDb(db);
       return sendJson(res, 200, { completion });
     }
 
@@ -404,11 +648,14 @@ async function routeApi(req, res) {
         days,
         dueTime,
         icon: body.icon || "star",
+        weight: Math.max(0.1, Number(body.weight || 1)),
+        requiresChildConfirmation: body.requiresChildConfirmation === false ? false : true,
         active: true,
         createdAt: new Date().toISOString()
       };
       db.tasks.push(task);
-      writeDb(db);
+      addAudit(db, responsible.id, "task_created", { taskId: task.id, childId: child.id, title: task.title });
+      await writeDb(db);
       return sendJson(res, 201, { task });
     }
 
@@ -423,7 +670,10 @@ async function routeApi(req, res) {
       if (Array.isArray(body.days)) task.days = body.days.filter((day) => weekdayKeys.includes(day));
       if (body.active !== undefined) task.active = Boolean(body.active);
       if (body.icon !== undefined) task.icon = String(body.icon);
-      writeDb(db);
+      if (body.weight !== undefined) task.weight = Math.max(0.1, Number(body.weight || 1));
+      if (body.requiresChildConfirmation !== undefined) task.requiresChildConfirmation = Boolean(body.requiresChildConfirmation);
+      addAudit(db, responsible.id, "task_updated", { taskId: task.id, childId: task.childId, title: task.title });
+      await writeDb(db);
       return sendJson(res, 200, { task });
     }
 
@@ -436,8 +686,14 @@ async function routeApi(req, res) {
       if (db.users.some((item) => item.name.toLowerCase() === name.toLowerCase())) return sendJson(res, 409, { error: "Já existe usuário com esse nome." });
       const child = { id: id("usr"), name, role: "child", passwordHash: null, createdAt: new Date().toISOString() };
       db.users.push(child);
-      db.childrenSettings.push({ childId: child.id, allowance: Number(body.allowance || 50), currency: "BRL" });
-      writeDb(db);
+      db.childrenSettings.push({
+        childId: child.id,
+        allowance: Number(body.allowance || 50),
+        currency: "BRL",
+        phonePenaltyPer10Minutes: Number(body.phonePenaltyPer10Minutes || DEFAULT_PHONE_PENALTY_PER_10_MINUTES)
+      });
+      addAudit(db, responsible.id, "child_created", { childId: child.id, name: child.name });
+      await writeDb(db);
       return sendJson(res, 201, { child: publicUser(child) });
     }
 
@@ -454,7 +710,11 @@ async function routeApi(req, res) {
         db.childrenSettings.push(setting);
       }
       if (body.allowance !== undefined) setting.allowance = Math.max(0, Number(body.allowance || 0));
-      writeDb(db);
+      if (body.phonePenaltyPer10Minutes !== undefined) {
+        setting.phonePenaltyPer10Minutes = Math.max(0, Number(body.phonePenaltyPer10Minutes || 0));
+      }
+      addAudit(db, responsible.id, "child_settings_updated", { childId, allowance: setting.allowance, phonePenaltyPer10Minutes: setting.phonePenaltyPer10Minutes });
+      await writeDb(db);
       return sendJson(res, 200, { child: publicUser(child), setting });
     }
 
@@ -467,7 +727,8 @@ async function routeApi(req, res) {
       if (!user || password.length < 4) return sendJson(res, 400, { error: "Usuário ou senha inválida." });
       user.passwordHash = hashPassword(password);
       db.sessions = db.sessions.filter((session) => session.userId !== user.id);
-      writeDb(db);
+      addAudit(db, responsible.id, "password_changed", { userId: user.id });
+      await writeDb(db);
       return sendJson(res, 200, { user: publicUser(user) });
     }
 
@@ -485,10 +746,59 @@ async function routeApi(req, res) {
           completion.approvedAt = now;
           completion.approvedBy = responsible.id;
           changed.push(completion);
+          addAudit(db, responsible.id, status === "approved" ? "completion_approved" : "completion_rejected", {
+            completionId: completion.id,
+            taskId: completion.taskId,
+            childId: completion.childId,
+            date: completion.date
+          });
         }
       });
-      writeDb(db);
+      await writeDb(db);
       return sendJson(res, 200, { completions: changed });
+    }
+
+    if (req.method === "POST" && pathName === "/api/phone-rule/report") {
+      const responsible = requireResponsible(req, res, db);
+      if (!responsible) return;
+      const body = await readBody(req);
+      const child = db.users.find((item) => item.id === body.childId && item.role === "child");
+      if (!child) return sendJson(res, 400, { error: "Criança inválida." });
+      const date = body.date || isoDateLocal();
+      const task = db.tasks.find((item) => item.childId === child.id && item.active && isPhoneTask(item));
+      if (!task) return sendJson(res, 404, { error: "Regra do celular não encontrada." });
+      if (!isTaskScheduledOn(task, date)) return sendJson(res, 400, { error: "A regra do celular não existe nesse dia." });
+
+      const setting = db.childrenSettings.find((item) => item.childId === child.id);
+      const fulfilled = Boolean(body.fulfilled);
+      const minutes = fulfilled ? 0 : body.usedUntil
+        ? minutesBetweenTimes(task.dueTime, String(body.usedUntil))
+        : Math.max(0, Math.round(Number(body.minutes || 0)));
+      const penaltyAmount = fulfilled ? 0 : phonePenaltyFor(setting, minutes);
+      let completion = db.completions.find((item) => item.taskId === task.id && item.date === date);
+      if (!completion) {
+        completion = { id: id("cmp"), taskId: task.id, childId: child.id, date };
+        db.completions.push(completion);
+      }
+      completion.status = fulfilled ? "approved" : "rejected";
+      completion.completedAt = new Date().toISOString();
+      completion.approvedAt = completion.completedAt;
+      completion.approvedBy = responsible.id;
+      completion.reportedBy = responsible.id;
+      completion.reportedAt = completion.completedAt;
+      completion.violationMinutes = minutes;
+      completion.usedUntil = fulfilled ? null : body.usedUntil || null;
+      completion.penaltyAmount = penaltyAmount;
+      addAudit(db, responsible.id, fulfilled ? "phone_rule_approved" : "phone_rule_rejected", {
+        completionId: completion.id,
+        taskId: task.id,
+        childId: child.id,
+        date,
+        minutes,
+        penaltyAmount
+      });
+      await writeDb(db);
+      return sendJson(res, 200, { completion });
     }
 
     return sendJson(res, 404, { error: "Rota não encontrada." });
@@ -497,14 +807,25 @@ async function routeApi(req, res) {
   }
 }
 
-ensureDb();
-
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    sendJson(res, 200, { ok: true, storage: pool ? "postgres" : "json" });
+    return;
+  }
   if (req.url.startsWith("/api/")) {
     routeApi(req, res);
   } else {
     routeStatic(req, res);
   }
-}).listen(PORT, () => {
-  console.log(`JaFiz rodando em http://localhost:${PORT}`);
 });
+
+initStorage()
+  .then(() => {
+    server.listen(PORT, HOST, () => {
+      console.log(`JaFiz rodando em http://${HOST}:${PORT} usando ${pool ? "PostgreSQL" : "JSON local"}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Falha ao inicializar armazenamento:", error);
+    process.exit(1);
+  });

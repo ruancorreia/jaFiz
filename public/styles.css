@@ -245,9 +245,45 @@ button {
   background: #f0fff8;
 }
 
+.task-card.approved {
+  border-color: rgba(22, 137, 95, 0.48);
+  background: #ecfff6;
+}
+
+.task-card.rejected {
+  border-color: rgba(189, 47, 69, 0.42);
+  background: #fff0f3;
+}
+
 .task-card.late {
-  border-color: rgba(189, 47, 69, 0.32);
-  background: #fff4f6;
+  border-color: rgba(244, 185, 66, 0.56);
+  background: #fff7df;
+}
+
+.task-card.waiting {
+  border-color: rgba(244, 185, 66, 0.42);
+  background: #fffaf0;
+}
+
+.task-card.celebrate {
+  animation: task-pop 520ms ease;
+}
+
+@keyframes task-pop {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 10px 22px rgba(29, 36, 51, 0.08);
+  }
+
+  45% {
+    transform: scale(1.025);
+    box-shadow: 0 18px 32px rgba(69, 196, 161, 0.28);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow: 0 10px 22px rgba(29, 36, 51, 0.08);
+  }
 }
 
 .task-icon {
@@ -372,12 +408,187 @@ button {
   gap: 18px;
 }
 
+.main-stack {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
 .panel {
   padding: 18px;
 }
 
 .panel h2 {
   margin: 0 0 14px;
+}
+
+.side-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.progress-panel {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.child-shell .progress-panel {
+  max-width: 1180px;
+  margin: 0 auto 22px;
+}
+
+.child-history {
+  max-width: 1180px;
+  margin: 22px auto 0;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.history-item,
+.report-item,
+.audit-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.history-item:first-of-type,
+.report-item:first-child,
+.audit-item:first-of-type {
+  border-top: 0;
+}
+
+.history-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.history-item span,
+.audit-item span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panel-heading h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.panel-heading span {
+  font-weight: 900;
+}
+
+.progress-chart {
+  width: 100%;
+  height: 170px;
+  display: block;
+}
+
+.progress-chart line {
+  stroke: var(--line);
+  stroke-width: 2;
+}
+
+.progress-chart polyline {
+  fill: none;
+  stroke: var(--mint);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.progress-chart circle {
+  fill: var(--ink);
+}
+
+.progress-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  font-weight: 800;
+}
+
+.check-row input {
+  width: 18px;
+  height: 18px;
+}
+
+.phone-preview {
+  min-height: 24px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.dashboard-filters {
+  padding-bottom: 14px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.calendar-day {
+  min-height: 62px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.calendar-day strong,
+.calendar-day span {
+  display: block;
+}
+
+.calendar-day.approved {
+  border-color: rgba(22, 137, 95, 0.36);
+  background: #ecfff6;
+}
+
+.calendar-day.pending {
+  border-color: rgba(244, 185, 66, 0.5);
+  background: #fff8df;
+}
+
+.calendar-day.rejected {
+  border-color: rgba(189, 47, 69, 0.36);
+  background: #fff0f3;
+}
+
+.calendar-day.late {
+  border-color: rgba(244, 185, 66, 0.58);
+  background: #fff4d6;
+}
+
+.report-list {
+  display: grid;
 }
 
 .form-grid {
