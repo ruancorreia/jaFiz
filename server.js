@@ -26,6 +26,7 @@ function createInitialDb() {
   const now = new Date().toISOString();
   const initial = {
     users: [
+      { id: id("usr"), name: "Admin", role: "admin", passwordHash: null, createdAt: now },
       { id: id("usr"), name: "Ruan", role: "responsible", passwordHash: null, createdAt: now },
       { id: id("usr"), name: "Ana Carla", role: "responsible", passwordHash: null, createdAt: now },
       { id: id("usr"), name: "Lara", role: "child", passwordHash: null, createdAt: now }
@@ -237,11 +238,29 @@ function requireUser(req, res, db) {
 function requireResponsible(req, res, db) {
   const user = requireUser(req, res, db);
   if (!user) return null;
-  if (user.role !== "responsible") {
+  if (!isResponsible(user)) {
     sendJson(res, 403, { error: "Apenas responsáveis podem fazer isso." });
     return null;
   }
   return user;
+}
+
+function requireAdmin(req, res, db) {
+  const user = requireUser(req, res, db);
+  if (!user) return null;
+  if (!isAdmin(user)) {
+    sendJson(res, 403, { error: "Apenas administradores podem fazer isso." });
+    return null;
+  }
+  return user;
+}
+
+function isAdmin(user) {
+  return user?.role === "admin";
+}
+
+function isResponsible(user) {
+  return user?.role === "responsible" || isAdmin(user);
 }
 
 function saoPauloParts(date = new Date()) {
@@ -323,6 +342,16 @@ function minutesBetweenTimes(startTime, endTime) {
 
 function migrateDbSchema(db) {
   let changed = false;
+  if (!db.users.some((user) => user.role === "admin" || user.name.toLowerCase() === "admin")) {
+    db.users.unshift({
+      id: id("usr"),
+      name: "Admin",
+      role: "admin",
+      passwordHash: null,
+      createdAt: new Date().toISOString()
+    });
+    changed = true;
+  }
   if (!Array.isArray(db.monthClosings)) {
     db.monthClosings = [];
     changed = true;
@@ -594,8 +623,9 @@ async function routeApi(req, res) {
       }));
       const tasks = db.tasks.map((task) => ({ ...task, value: taskValueMap(db, task.childId, month).values[task.id] || 0 }));
       const completions = db.completions.filter((item) => item.date.startsWith(month));
-      const auditLog = user.role === "responsible" ? db.auditLog.slice(0, 30) : [];
-      return sendJson(res, 200, { user: publicUser(user), children, tasks, completions, auditLog, today, month });
+      const auditLog = isResponsible(user) ? db.auditLog.slice(0, 30) : [];
+      const users = isAdmin(user) ? db.users.map(publicUser) : [];
+      return sendJson(res, 200, { user: publicUser(user), users, children, tasks, completions, auditLog, today, month });
     }
 
     if (req.method === "POST" && pathName === "/api/tasks/complete") {
@@ -722,14 +752,17 @@ async function routeApi(req, res) {
       const responsible = requireResponsible(req, res, db);
       if (!responsible) return;
       const body = await readBody(req);
-      const user = db.users.find((item) => item.id === body.userId);
+      const targetUser = db.users.find((item) => item.id === body.userId);
       const password = String(body.password || "");
-      if (!user || password.length < 4) return sendJson(res, 400, { error: "Usuário ou senha inválida." });
-      user.passwordHash = hashPassword(password);
-      db.sessions = db.sessions.filter((session) => session.userId !== user.id);
-      addAudit(db, responsible.id, "password_changed", { userId: user.id });
+      if (!targetUser || password.length < 4) return sendJson(res, 400, { error: "Usuário ou senha inválida." });
+      if (!isAdmin(responsible) && targetUser.role !== "child") {
+        return sendJson(res, 403, { error: "Apenas administradores podem resetar qualquer senha." });
+      }
+      targetUser.passwordHash = hashPassword(password);
+      db.sessions = db.sessions.filter((session) => session.userId !== targetUser.id);
+      addAudit(db, responsible.id, "password_changed", { userId: targetUser.id });
       await writeDb(db);
-      return sendJson(res, 200, { user: publicUser(user) });
+      return sendJson(res, 200, { user: publicUser(targetUser) });
     }
 
     if (req.method === "POST" && pathName === "/api/completions/approve") {

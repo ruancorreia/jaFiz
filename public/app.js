@@ -27,6 +27,12 @@ const iconLabels = {
 let state = { view: "dashboard", data: null, me: null };
 
 const money = (value) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const isAdmin = () => state.me?.role === "admin";
+const roleLabel = (role) => ({
+  admin: "Admin",
+  responsible: "Responsável",
+  child: "Criança"
+})[role] || role;
 const today = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -601,7 +607,7 @@ function renderAuditLog() {
     <section class="panel">
       <h2>Auditoria recente</h2>
       ${rows.length ? rows.slice(0, 8).map((item) => {
-        const actor = state.data.children.find((child) => child.id === item.actorId) || state.data.user;
+        const actor = [...(state.data.users || []), ...state.data.children].find((user) => user.id === item.actorId) || state.data.user;
         return `
           <div class="audit-item">
             <strong>${actions[item.action] || item.action}</strong>
@@ -789,6 +795,7 @@ function renderFamilyView(container) {
           <button class="primary" type="submit">Adicionar</button>
         </form>
       </section>
+      ${renderAdminUsersPanel()}
     </div>
   `;
   container.querySelectorAll(".child-settings").forEach((form) => {
@@ -830,6 +837,45 @@ function renderFamilyView(container) {
       alert(error.message);
     }
   });
+  container.querySelectorAll(".user-password-reset").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      try {
+        await api("/api/password", {
+          method: "POST",
+          body: JSON.stringify({ userId: form.dataset.id, password: data.get("password") })
+        });
+        form.reset();
+        if (form.dataset.id === state.me.id) {
+          await renderLogin();
+          return;
+        }
+        await loadApp();
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  });
+}
+
+function renderAdminUsersPanel() {
+  if (!isAdmin()) return "";
+  const users = state.data.users || [];
+  return `
+    <section class="panel">
+      <h2>Administração de usuários</h2>
+      ${users.map((user) => `
+        <form class="user-password-reset" data-id="${user.id}">
+          <p><strong>${escapeHtml(user.name)}</strong> <span class="pill">${escapeHtml(roleLabel(user.role))}</span></p>
+          <div class="form-grid">
+            <label class="field"><span>Nova senha</span><input name="password" type="password" minlength="4" required placeholder="Mínimo 4 caracteres"></label>
+          </div>
+          <button class="secondary" type="submit">Resetar senha</button>
+        </form>
+      `).join("<hr>")}
+    </section>
+  `;
 }
 
 async function approveIds(ids, status = "approved") {
