@@ -3,7 +3,7 @@
 ## Fase 1 - Base familiar confiável
 
 - Persistência em banco gerenciado, como PostgreSQL no Render, para substituir o JSON local quando o uso da família virar rotina.
-- Migração de dados e backups automáticos, com exportação mensal da mesada e histórico de tarefas.
+- Migração de dados e backups automáticos, com exportação mensal de pontos, recompensas e histórico de tarefas.
 - Tela de edição completa de responsáveis, crianças, tarefas e combinações de calendário.
 - Registro de auditoria para saber quem aprovou, reprovou, editou ou alterou senha.
 
@@ -13,7 +13,7 @@
 - Tarefas com peso diferente, já que algumas são mais importantes do que outras, especialmente a regra do celular.
 - Bônus por sequência de dias cumpridos, sem apagar o cálculo financeiro principal.
 - Pausa planejada para férias, viagens, doença ou dias sem obrigação.
-- Fechamento mensal da mesada, congelando o valor final de cada mês.
+- Fechamento mensal de recompensas, congelando pontos, quantidade de Robux e status de entrega.
 
 ## Fase 3 - Experiência da criança
 
@@ -45,4 +45,4 @@
 - Ambiente de produção e ambiente de testes.
 - Testes automatizados de API e fluxo principal no navegador.
 - Observabilidade básica: logs estruturados, erros e métricas de uso.
-- Página de política familiar, explicando as regras da mesada de forma transparente.
+- Página de política familiar, explicando regras de pontos, recompensas e entrega mediada por responsável.

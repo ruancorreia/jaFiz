@@ -42,9 +42,11 @@ function createInitialDb() {
   const lara = initial.users.find((user) => user.name === "Lara");
   initial.childrenSettings.push({
     childId: lara.id,
-    allowance: 50,
-    currency: "BRL",
-    phonePenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES
+    monthlyPoints: 1000,
+    rewardType: "robux",
+    rewardUnits: 400,
+    robloxUsername: "",
+    pointsPenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES
   });
   const defaults = [
     ["Limpar coco da Lola do quintal", "daily", ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], "20:00", "poop"],
@@ -327,7 +329,7 @@ function isPhoneTask(task) {
 
 function phonePenaltyFor(setting, minutes) {
   const blocks = Math.ceil(Math.max(0, Number(minutes || 0)) / 10);
-  return blocks * Number(setting?.phonePenaltyPer10Minutes || DEFAULT_PHONE_PENALTY_PER_10_MINUTES);
+  return blocks * Number(setting?.pointsPenaltyPer10Minutes ?? setting?.phonePenaltyPer10Minutes ?? DEFAULT_PHONE_PENALTY_PER_10_MINUTES);
 }
 
 function minutesBetweenTimes(startTime, endTime) {
@@ -360,7 +362,44 @@ function migrateDbSchema(db) {
     db.auditLog = [];
     changed = true;
   }
+  db.monthClosings.forEach((closing) => {
+    const setting = db.childrenSettings.find((item) => item.childId === closing.childId) || {};
+    if (closing.pointsAvailable === undefined) {
+      closing.pointsAvailable = Number(closing.finalAmount || 0);
+      closing.totalPoints = Number(closing.allowance || setting.monthlyPoints || 0);
+      closing.pointsLost = Number(closing.lost || 0);
+      closing.rewardType = setting.rewardType || "robux";
+      closing.rewardAmount = closing.totalPoints ? Math.floor((closing.pointsAvailable / closing.totalPoints) * Number(setting.rewardUnits ?? setting.allowance ?? 0)) : 0;
+      closing.rewardStatus = "pending_approval";
+      closing.approvedAt = null;
+      closing.approvedBy = null;
+      closing.deliveredAt = null;
+      closing.deliveredBy = null;
+      changed = true;
+    }
+  });
   db.childrenSettings.forEach((setting) => {
+    // Keep existing family data usable while moving from money to points.
+    if (setting.monthlyPoints === undefined) {
+      setting.monthlyPoints = Math.max(0, Number(setting.allowance || 0));
+      changed = true;
+    }
+    if (!setting.rewardType) {
+      setting.rewardType = "robux";
+      changed = true;
+    }
+    if (setting.rewardUnits === undefined) {
+      setting.rewardUnits = Math.max(0, Number(setting.allowance || 0));
+      changed = true;
+    }
+    if (setting.robloxUsername === undefined) {
+      setting.robloxUsername = "";
+      changed = true;
+    }
+    if (setting.pointsPenaltyPer10Minutes === undefined) {
+      setting.pointsPenaltyPer10Minutes = Number(setting.phonePenaltyPer10Minutes || DEFAULT_PHONE_PENALTY_PER_10_MINUTES);
+      changed = true;
+    }
     if (setting.phonePenaltyPer10Minutes === undefined || setting.phonePenaltyPer10Minutes === 2) {
       setting.phonePenaltyPer10Minutes = DEFAULT_PHONE_PENALTY_PER_10_MINUTES;
       changed = true;
@@ -406,10 +445,17 @@ function ensureMonthlyClosings(db) {
         id: id("cls"),
         childId: child.id,
         month,
-        allowance: summary.allowance,
-        lost: summary.lost,
-        finalAmount: summary.remaining,
-        closedAt: new Date().toISOString()
+        totalPoints: summary.totalPoints,
+        pointsLost: summary.pointsLost,
+        pointsAvailable: summary.pointsAvailable,
+        rewardType: summary.reward.type,
+        rewardAmount: summary.reward.amount,
+        rewardStatus: "pending_approval",
+        closedAt: new Date().toISOString(),
+        approvedAt: null,
+        approvedBy: null,
+        deliveredAt: null,
+        deliveredBy: null
       });
       changed = true;
     });
@@ -439,7 +485,7 @@ function taskValueMap(db, childId, month = isoDateLocal().slice(0, 7)) {
   const [year, monthNumber] = month.split("-").map(Number);
   const monthIndex = monthNumber - 1;
   const settings = db.childrenSettings.find((item) => item.childId === childId);
-  const allowance = Number(settings?.allowance || 0);
+  const allowance = Number(settings?.monthlyPoints ?? settings?.allowance ?? 0);
   const tasks = db.tasks.filter((task) => task.childId === childId && task.active);
   const totalOccurrences = tasks.reduce((sum, task) => sum + getTaskDatesForMonth(task, year, monthIndex).length, 0);
   const totalWeight = tasks.reduce((sum, task) => {
@@ -511,9 +557,13 @@ function childSummary(db, childId, month = isoDateLocal().slice(0, 7), options =
   const pending = completions.filter((item) => item.status === "pending").length;
   const penaltyLost = completions.reduce((sum, item) => sum + Number(item.penaltyAmount || 0), 0);
   const lost = missed.reduce((sum, entry) => sum + entry.value, 0) + penaltyLost;
+  const settings = db.childrenSettings.find((item) => item.childId === childId) || {};
+  const pointsAvailable = Math.max(0, valueMap.allowance - lost);
+  const rewardUnits = Math.max(0, Number(settings.rewardUnits || 0));
+  const rewardAmount = valueMap.allowance ? Math.floor((pointsAvailable / valueMap.allowance) * rewardUnits) : 0;
   const closed = db.monthClosings.find((closing) => closing.childId === childId && closing.month === month);
   return {
-    allowance: valueMap.allowance,
+    totalPoints: valueMap.allowance,
     totalOccurrences: valueMap.totalOccurrences,
     totalWeight: valueMap.totalWeight,
     taskValue: valueMap.unitValue,
@@ -521,8 +571,9 @@ function childSummary(db, childId, month = isoDateLocal().slice(0, 7), options =
     pending,
     missed: missed.length,
     penaltyLost,
-    lost,
-    remaining: Math.max(0, valueMap.allowance - lost),
+    pointsLost: lost,
+    pointsAvailable,
+    reward: { type: settings.rewardType || "robux", amount: rewardAmount, target: rewardUnits },
     closed: options.skipClosing ? null : closed || null,
     progress: progressForMonth(db, childId, month, valueMap.allowance)
   };
@@ -616,8 +667,11 @@ async function routeApi(req, res) {
       const children = db.users.filter((item) => item.role === "child").map((child) => ({
         ...publicUser(child),
         settings: db.childrenSettings.find((setting) => setting.childId === child.id) || {
-          allowance: 0,
-          phonePenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES
+          monthlyPoints: 0,
+          rewardType: "robux",
+          rewardUnits: 0,
+          robloxUsername: "",
+          pointsPenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES
         },
         summary: childSummary(db, child.id, month)
       }));
@@ -718,9 +772,11 @@ async function routeApi(req, res) {
       db.users.push(child);
       db.childrenSettings.push({
         childId: child.id,
-        allowance: Number(body.allowance || 50),
-        currency: "BRL",
-        phonePenaltyPer10Minutes: Number(body.phonePenaltyPer10Minutes || DEFAULT_PHONE_PENALTY_PER_10_MINUTES)
+        monthlyPoints: Math.max(0, Number(body.monthlyPoints || 1000)),
+        rewardType: ["robux", "custom", "screen_time"].includes(body.rewardType) ? body.rewardType : "robux",
+        rewardUnits: Math.max(0, Number(body.rewardUnits || 400)),
+        robloxUsername: String(body.robloxUsername || "").trim().slice(0, 50),
+        pointsPenaltyPer10Minutes: Math.max(0, Number(body.pointsPenaltyPer10Minutes || DEFAULT_PHONE_PENALTY_PER_10_MINUTES))
       });
       addAudit(db, responsible.id, "child_created", { childId: child.id, name: child.name });
       await writeDb(db);
@@ -736,16 +792,42 @@ async function routeApi(req, res) {
       const body = await readBody(req);
       let setting = db.childrenSettings.find((item) => item.childId === childId);
       if (!setting) {
-        setting = { childId, allowance: 0, currency: "BRL" };
+        setting = { childId, monthlyPoints: 0, rewardType: "robux", rewardUnits: 0, robloxUsername: "", pointsPenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES };
         db.childrenSettings.push(setting);
       }
-      if (body.allowance !== undefined) setting.allowance = Math.max(0, Number(body.allowance || 0));
-      if (body.phonePenaltyPer10Minutes !== undefined) {
-        setting.phonePenaltyPer10Minutes = Math.max(0, Number(body.phonePenaltyPer10Minutes || 0));
-      }
-      addAudit(db, responsible.id, "child_settings_updated", { childId, allowance: setting.allowance, phonePenaltyPer10Minutes: setting.phonePenaltyPer10Minutes });
+      if (body.monthlyPoints !== undefined) setting.monthlyPoints = Math.max(0, Number(body.monthlyPoints || 0));
+      if (body.rewardType !== undefined && ["robux", "custom", "screen_time"].includes(body.rewardType)) setting.rewardType = body.rewardType;
+      if (body.rewardUnits !== undefined) setting.rewardUnits = Math.max(0, Number(body.rewardUnits || 0));
+      if (body.robloxUsername !== undefined) setting.robloxUsername = String(body.robloxUsername || "").trim().slice(0, 50);
+      if (body.pointsPenaltyPer10Minutes !== undefined) setting.pointsPenaltyPer10Minutes = Math.max(0, Number(body.pointsPenaltyPer10Minutes || 0));
+      addAudit(db, responsible.id, "child_settings_updated", { childId, monthlyPoints: setting.monthlyPoints, rewardType: setting.rewardType, rewardUnits: setting.rewardUnits });
       await writeDb(db);
       return sendJson(res, 200, { child: publicUser(child), setting });
+    }
+
+    if (req.method === "POST" && pathName.startsWith("/api/rewards/")) {
+      const responsible = requireResponsible(req, res, db);
+      if (!responsible) return;
+      const closing = db.monthClosings.find((item) => item.id === pathName.split("/").pop());
+      if (!closing) return sendJson(res, 404, { error: "Recompensa mensal não encontrada." });
+      const action = (await readBody(req)).action;
+      const now = new Date().toISOString();
+      if (action === "approve" && closing.rewardStatus === "pending_approval") {
+        closing.rewardStatus = "approved";
+        closing.approvedAt = now;
+        closing.approvedBy = responsible.id;
+      } else if (action === "deliver" && closing.rewardStatus === "approved") {
+        closing.rewardStatus = "delivered";
+        closing.deliveredAt = now;
+        closing.deliveredBy = responsible.id;
+      } else if (action === "cancel" && closing.rewardStatus !== "delivered") {
+        closing.rewardStatus = "cancelled";
+      } else {
+        return sendJson(res, 400, { error: "Essa alteração de recompensa não é permitida." });
+      }
+      addAudit(db, responsible.id, `reward_${closing.rewardStatus}`, { closingId: closing.id, childId: closing.childId, month: closing.month, rewardAmount: closing.rewardAmount });
+      await writeDb(db);
+      return sendJson(res, 200, { closing });
     }
 
     if (req.method === "POST" && pathName === "/api/password") {

@@ -26,7 +26,13 @@ const iconLabels = {
 };
 let state = { view: "dashboard", data: null, me: null };
 
-const money = (value) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const points = (value) => `${Math.round(Number(value || 0)).toLocaleString("pt-BR")} pts`;
+const rewardLabel = (reward) => {
+  const amount = Math.floor(Number(reward?.amount || 0));
+  if (reward?.type === "robux") return `${amount.toLocaleString("pt-BR")} Robux`;
+  if (reward?.type === "screen_time") return `${amount.toLocaleString("pt-BR")} min de tela`;
+  return `${amount.toLocaleString("pt-BR")} recompensas`;
+};
 const isAdmin = () => state.me?.role === "admin";
 const roleLabel = (role) => ({
   admin: "Admin",
@@ -155,38 +161,38 @@ function statusText(status) {
 }
 
 function renderProgressChart(child, title = "Evolução no mês") {
-  const points = child.summary.progress || [];
-  const allowance = Number(child.summary.allowance || 0);
+  const progressPoints = child.summary.progress || [];
+  const allowance = Number(child.summary.totalPoints || 0);
   const width = 520;
   const height = 160;
   const pad = 18;
   const plotWidth = width - pad * 2;
   const plotHeight = height - pad * 2;
-  const max = Math.max(allowance, ...points.map((point) => Number(point.remaining || 0)), 1);
-  const coords = points.map((point, index) => {
-    const x = pad + (points.length <= 1 ? 0 : (index / (points.length - 1)) * plotWidth);
+  const max = Math.max(allowance, ...progressPoints.map((point) => Number(point.remaining || 0)), 1);
+  const coords = progressPoints.map((point, index) => {
+    const x = pad + (progressPoints.length <= 1 ? 0 : (index / (progressPoints.length - 1)) * plotWidth);
     const y = pad + plotHeight - (Number(point.remaining || 0) / max) * plotHeight;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
-  const latest = points.at(-1);
+  const latest = progressPoints.at(-1);
   return `
     <section class="progress-panel">
       <div class="panel-heading">
         <h2>${escapeHtml(title)}</h2>
-        <span>${money(latest?.remaining ?? child.summary.remaining)}</span>
+        <span>${points(latest?.remaining ?? child.summary.pointsAvailable)}</span>
       </div>
       <svg class="progress-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(title)}">
         <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}"></line>
         <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"></line>
         <polyline points="${coords.join(" ")}"></polyline>
-        ${points.map((point, index) => {
+        ${progressPoints.map((point, index) => {
           const [x, y] = coords[index]?.split(",") || [pad, height - pad];
-          return `<circle cx="${x}" cy="${y}" r="3"><title>${point.date.split("-").reverse().join("/")} - ${money(point.remaining)}</title></circle>`;
+          return `<circle cx="${x}" cy="${y}" r="3"><title>${point.date.split("-").reverse().join("/")} - ${points(point.remaining)}</title></circle>`;
         }).join("")}
       </svg>
       <div class="progress-legend">
-        <span>Descontos: ${money(child.summary.lost)}</span>
-        <span>Multas de celular: ${money(child.summary.penaltyLost || 0)}</span>
+        <span>Pontos perdidos: ${points(child.summary.pointsLost)}</span>
+        <span>Penalidades de celular: ${points(child.summary.penaltyLost || 0)}</span>
       </div>
     </section>
   `;
@@ -211,7 +217,7 @@ function renderChild() {
           <p>Marque as tarefas antes do horário limite. Depois um responsável confere e aprova.</p>
         </div>
         <div class="score-grid">
-          <div class="score"><span>Mesada prevista</span><strong>${money(summary.remaining)}</strong></div>
+          <div class="score"><span>Recompensa prevista</span><strong>${rewardLabel(summary.reward)}</strong></div>
           <div class="score"><span>Feitas</span><strong>${summary.approved}</strong></div>
           <div class="score"><span>Pendentes</span><strong>${summary.pending}</strong></div>
         </div>
@@ -253,7 +259,7 @@ function renderChildTask(task) {
         <h3>${escapeHtml(task.title)}</h3>
         <div class="task-meta">
           <span class="pill">Até ${task.dueTime}</span>
-          <span class="pill">${money(task.value)}</span>
+          <span class="pill">${points(task.value)}</span>
           <span class="pill ${statusClass}">${displayedStatus}</span>
         </div>
       </div>
@@ -284,16 +290,16 @@ function renderChildHistory(child) {
     <section class="child-history">
       <div class="panel-heading">
         <h2>Histórico do mês</h2>
-        <span>${money(child.summary.remaining)}</span>
+        <span>${rewardLabel(child.summary.reward)}</span>
       </div>
       ${rows.length ? rows.map((completion) => {
         const task = state.data.tasks.find((item) => item.id === completion.taskId);
         const penalty = Number(completion.penaltyAmount || 0);
         const value = Number(task?.value || 0);
         const detail = completion.status === "approved"
-          ? `Ganhou ${money(value)}`
+          ? `Ganhou ${points(value)}`
           : completion.status === "rejected"
-            ? `Perdeu ${money(value + penalty)}`
+            ? `Perdeu ${points(value + penalty)}`
             : completion.completedLate ? "Feita com atraso, aguardando aprovação" : "Aguardando aprovação";
         return `
           <div class="history-item">
@@ -334,9 +340,9 @@ function renderResponsible() {
           </div>
         </div>
         <div class="cards">
-          <div class="metric"><span>Mesada atual</span><strong>${money(summary.allowance)}</strong></div>
-          <div class="metric"><span>Previsto a receber</span><strong>${money(summary.remaining)}</strong></div>
-          <div class="metric"><span>Valor por tarefa</span><strong>${money(summary.taskValue)}</strong></div>
+          <div class="metric"><span>Meta mensal</span><strong>${points(summary.totalPoints)}</strong></div>
+          <div class="metric"><span>Recompensa prevista</span><strong>${rewardLabel(summary.reward)}</strong></div>
+          <div class="metric"><span>Pontos por tarefa</span><strong>${points(summary.taskValue)}</strong></div>
           <div class="metric"><span>Pendentes</span><strong>${summary.pending || 0}</strong></div>
         </div>
         <div class="content"></div>
@@ -396,10 +402,10 @@ function renderDashboardView(container) {
           <h2>Resumo do mês</h2>
           ${state.data.children.map((child) => `
             <p><strong>${escapeHtml(child.name)}</strong></p>
-            <p>Mesada: ${money(child.summary.allowance)}</p>
-            <p>Descontos: ${money(child.summary.lost)}</p>
-            <p>Recebe hoje: ${money(child.summary.remaining)}</p>
-            ${child.summary.closed ? `<p class="pill">Fechado: ${money(child.summary.closed.finalAmount)}</p>` : ""}
+            <p>Meta: ${points(child.summary.totalPoints)}</p>
+            <p>Pontos perdidos: ${points(child.summary.pointsLost)}</p>
+            <p>Recompensa: ${rewardLabel(child.summary.reward)}</p>
+            ${renderRewardClosing(child)}
           `).join("")}
         </section>
         ${state.data.children.map((child) => renderProgressChart(child, `Evolução de ${child.name}`)).join("")}
@@ -422,6 +428,26 @@ function renderDashboardView(container) {
   container.querySelectorAll(".dashboard-filters select").forEach((select) => select.addEventListener("change", renderRows));
   renderRows();
   bindPhoneRulePanel(container);
+  container.querySelectorAll(".reward-action").forEach((button) => button.addEventListener("click", async () => {
+    try {
+      await api(`/api/rewards/${button.dataset.closing}`, { method: "POST", body: JSON.stringify({ action: button.dataset.action }) });
+      await loadApp();
+    } catch (error) {
+      alert(error.message);
+    }
+  }));
+}
+
+function renderRewardClosing(child) {
+  const closing = child.summary.closed;
+  if (!closing) return `<p class="task-meta">A recompensa será fechada no fim do mês.</p>`;
+  const status = { pending_approval: "Aguardando aprovação", approved: "Pronta para entregar", delivered: "Entrega confirmada", cancelled: "Cancelada" }[closing.rewardStatus] || "Fechada";
+  const actions = closing.rewardStatus === "pending_approval"
+    ? `<button class="secondary reward-action" data-closing="${closing.id}" data-action="approve">Aprovar recompensa</button> <button class="danger reward-action" data-closing="${closing.id}" data-action="cancel">Cancelar</button>`
+    : closing.rewardStatus === "approved"
+      ? `<button class="primary reward-action" data-closing="${closing.id}" data-action="deliver">Confirmar entrega</button>`
+      : "";
+  return `<div class="reward-closing"><p><span class="pill">${status}: ${rewardLabel({ type: closing.rewardType, amount: closing.rewardAmount })}</span></p>${actions}</div>`;
 }
 
 function filteredDashboardRows(container) {
@@ -446,7 +472,7 @@ function completionRow(completion) {
       <td data-label="Tarefa">${escapeHtml(task?.title || "-")}</td>
       <td data-label="Dia">${completion.date.split("-").reverse().join("/")}</td>
       <td data-label="Status"><span class="pill status-${completion.status}">${statusText(completion.status)}</span></td>
-      <td data-label="Desconto">${penalty ? `${money(penalty)}${completion.violationMinutes ? ` (${completion.violationMinutes} min)` : ""}` : "-"}</td>
+      <td data-label="Penalidade">${penalty ? `${points(penalty)}${completion.violationMinutes ? ` (${completion.violationMinutes} min)` : ""}` : "-"}</td>
       <td data-label="Ações" class="row-actions">
         <button class="secondary approve" ${completion.status !== "pending" ? "disabled" : ""}>Aprovar</button>
         <button class="danger reject" ${completion.status !== "pending" ? "disabled" : ""}>Rejeitar</button>
@@ -500,13 +526,13 @@ function bindPhoneRulePanel(container) {
     const child = state.data.children.find((item) => item.id === form.childId.value);
     const phoneTask = phoneTaskFor();
     const allowedUntil = phoneTask?.dueTime || "21:00";
-    const unit = Number(child?.settings?.phonePenaltyPer10Minutes || 0);
+    const unit = Number(child?.settings?.pointsPenaltyPer10Minutes ?? child?.settings?.phonePenaltyPer10Minutes ?? 0);
     const minutes = minutesBetweenTimes(allowedUntil, form.usedUntil.value);
     const penalty = form.fulfilled.checked ? 0 : Math.ceil(minutes / 10) * unit;
     form.usedUntil.disabled = form.fulfilled.checked;
     preview.textContent = form.fulfilled.checked
       ? "Sem desconto extra."
-      : `Permitido até ${allowedUntil}. Excedeu ${minutes} min. Desconto: ${money(penalty)} (${money(unit)} a cada 10 min).`;
+      : `Permitido até ${allowedUntil}. Excedeu ${minutes} min. Penalidade: ${points(penalty)} (${points(unit)} a cada 10 min).`;
   };
   form.addEventListener("input", sync);
   sync();
@@ -703,7 +729,7 @@ function renderTasksView(container) {
         <td data-label="Criança">${escapeHtml(owner?.name || "-")}</td>
         <td data-label="Dias">${task.days.map((day) => weekdays.find(([key]) => key === day)?.[1]).join(", ")}</td>
         <td data-label="Limite">${task.dueTime}</td>
-        <td data-label="Valor">${money(task.value)}</td>
+        <td data-label="Pontos">${points(task.value)}</td>
         <td data-label="Ativa"><span class="pill">${task.active ? "Sim" : "Não"}</span></td>
         <td data-label="Ações"><button class="secondary edit-task" type="button">Editar</button></td>
       </tr>
@@ -779,8 +805,11 @@ function renderFamilyView(container) {
           <form class="child-settings" data-id="${child.id}">
             <p><strong>${escapeHtml(child.name)}</strong></p>
             <div class="form-grid">
-              <label class="field"><span>Mesada mensal</span><input name="allowance" type="number" min="0" step="0.01" value="${child.settings.allowance || 0}"></label>
-              <label class="field"><span>Multa celular / 10 min</span><input name="phonePenaltyPer10Minutes" type="number" min="0" step="0.01" value="${child.settings.phonePenaltyPer10Minutes || 0}"></label>
+          <label class="field"><span>Meta mensal de pontos</span><input name="monthlyPoints" type="number" min="0" step="1" value="${child.settings.monthlyPoints || 0}"></label>
+          <label class="field"><span>Tipo de recompensa</span><select name="rewardType"><option value="robux" ${child.settings.rewardType === "robux" ? "selected" : ""}>Robux</option><option value="screen_time" ${child.settings.rewardType === "screen_time" ? "selected" : ""}>Tempo de tela</option><option value="custom" ${child.settings.rewardType === "custom" ? "selected" : ""}>Personalizada</option></select></label>
+          <label class="field"><span>Quantidade máxima</span><input name="rewardUnits" type="number" min="0" step="1" value="${child.settings.rewardUnits || 0}"></label>
+          <label class="field"><span>Usuário Roblox (referência)</span><input name="robloxUsername" maxlength="50" value="${escapeHtml(child.settings.robloxUsername || "")}" placeholder="Sem senha ou PIN"></label>
+          <label class="field"><span>Penalidade celular / 10 min</span><input name="pointsPenaltyPer10Minutes" type="number" min="0" step="1" value="${child.settings.pointsPenaltyPer10Minutes || 0}"></label>
               <label class="field"><span>Nova senha</span><input name="password" type="password" placeholder="Opcional"></label>
             </div>
             <button class="secondary" type="submit">Salvar</button>
@@ -791,8 +820,9 @@ function renderFamilyView(container) {
         <h2>Adicionar criança</h2>
         <form class="new-child">
           <label class="field"><span>Nome</span><input name="name" required></label>
-          <label class="field"><span>Mesada</span><input name="allowance" type="number" min="0" step="0.01" value="50"></label>
-          <label class="field"><span>Multa celular / 10 min</span><input name="phonePenaltyPer10Minutes" type="number" min="0" step="0.01" value="1"></label>
+          <label class="field"><span>Meta mensal de pontos</span><input name="monthlyPoints" type="number" min="0" step="1" value="1000"></label>
+          <label class="field"><span>Recompensa máxima em Robux</span><input name="rewardUnits" type="number" min="0" step="1" value="400"></label>
+          <label class="field"><span>Penalidade celular / 10 min</span><input name="pointsPenaltyPer10Minutes" type="number" min="0" step="1" value="10"></label>
           <button class="primary" type="submit">Adicionar</button>
         </form>
       </section>
@@ -808,8 +838,8 @@ function renderFamilyView(container) {
         await api(`/api/children/${childId}`, {
           method: "PUT",
           body: JSON.stringify({
-            allowance: data.get("allowance"),
-            phonePenaltyPer10Minutes: data.get("phonePenaltyPer10Minutes")
+            monthlyPoints: data.get("monthlyPoints"), rewardType: data.get("rewardType"), rewardUnits: data.get("rewardUnits"),
+            robloxUsername: data.get("robloxUsername"), pointsPenaltyPer10Minutes: data.get("pointsPenaltyPer10Minutes")
           })
         });
         if (data.get("password")) {
@@ -829,8 +859,8 @@ function renderFamilyView(container) {
         method: "POST",
         body: JSON.stringify({
           name: data.get("name"),
-          allowance: data.get("allowance"),
-          phonePenaltyPer10Minutes: data.get("phonePenaltyPer10Minutes")
+          monthlyPoints: data.get("monthlyPoints"), rewardType: "robux", rewardUnits: data.get("rewardUnits"),
+          pointsPenaltyPer10Minutes: data.get("pointsPenaltyPer10Minutes")
         })
       });
       await loadApp();
