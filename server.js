@@ -43,8 +43,8 @@ function createInitialDb() {
   initial.childrenSettings.push({
     childId: lara.id,
     monthlyPoints: 1000,
-    rewardType: "robux",
-    rewardUnits: 400,
+    rewardType: "brl",
+    rewardUnits: 1000,
     robloxUsername: "",
     pointsPenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES
   });
@@ -154,7 +154,9 @@ async function writeDb(db) {
     `, [STATE_KEY, JSON.stringify(db)]);
     return;
   }
-  fs.writeFileSync(DB_FILE, `${JSON.stringify(db, null, 2)}\n`, "utf8");
+  const temporaryFile = `${DB_FILE}.tmp`;
+  fs.writeFileSync(temporaryFile, `${JSON.stringify(db, null, 2)}\n`, "utf8");
+  fs.renameSync(temporaryFile, DB_FILE);
 }
 
 function addAudit(db, actorId, action, details = {}) {
@@ -194,7 +196,7 @@ function parseCookies(req) {
 }
 
 function sendJson(res, status, payload, headers = {}) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...headers });
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers });
   res.end(JSON.stringify(payload));
 }
 
@@ -368,8 +370,8 @@ function migrateDbSchema(db) {
       closing.pointsAvailable = Number(closing.finalAmount || 0);
       closing.totalPoints = Number(closing.allowance || setting.monthlyPoints || 0);
       closing.pointsLost = Number(closing.lost || 0);
-      closing.rewardType = setting.rewardType || "robux";
-      closing.rewardAmount = closing.totalPoints ? Math.floor((closing.pointsAvailable / closing.totalPoints) * Number(setting.rewardUnits ?? setting.allowance ?? 0)) : 0;
+      closing.rewardType = setting.rewardType || "brl";
+      closing.rewardAmount = Math.round(Number(closing.pointsAvailable || 0) * 100) / 100;
       closing.rewardStatus = "pending_approval";
       closing.approvedAt = null;
       closing.approvedBy = null;
@@ -385,7 +387,7 @@ function migrateDbSchema(db) {
       changed = true;
     }
     if (!setting.rewardType) {
-      setting.rewardType = "robux";
+      setting.rewardType = "brl";
       changed = true;
     }
     if (setting.rewardUnits === undefined) {
@@ -422,6 +424,21 @@ function migrateDbSchema(db) {
       changed = true;
     }
   });
+  for (const setting of db.childrenSettings) {
+    if (setting.rewardType !== "brl" || setting.rewardUnits !== setting.monthlyPoints) {
+      setting.rewardType = "brl";
+      setting.rewardUnits = setting.monthlyPoints;
+      changed = true;
+    }
+  }
+  for (const closing of db.monthClosings) {
+    if (closing.rewardType !== "brl") {
+      closing.previousReward = { type: closing.rewardType, amount: closing.rewardAmount };
+      closing.rewardType = "brl";
+      closing.rewardAmount = Math.round(Math.max(0, Number(closing.pointsAvailable || 0)) * 100) / 100;
+      changed = true;
+    }
+  }
   return changed;
 }
 
@@ -488,16 +505,14 @@ function taskValueMap(db, childId, month = isoDateLocal().slice(0, 7)) {
   const allowance = Number(settings?.monthlyPoints ?? settings?.allowance ?? 0);
   const tasks = db.tasks.filter((task) => task.childId === childId && task.active);
   const totalOccurrences = tasks.reduce((sum, task) => sum + getTaskDatesForMonth(task, year, monthIndex).length, 0);
-  const totalWeight = tasks.reduce((sum, task) => {
-    return sum + getTaskDatesForMonth(task, year, monthIndex).length * Math.max(0, Number(task.weight || 1));
-  }, 0);
-  const unitValue = totalWeight ? allowance / totalWeight : 0;
+  const totalWeight = totalOccurrences;
+  const unitValue = totalOccurrences ? allowance / totalOccurrences : 0;
   return {
     allowance,
     totalOccurrences,
     totalWeight,
     unitValue,
-    values: Object.fromEntries(tasks.map((task) => [task.id, unitValue * Math.max(0, Number(task.weight || 1))]))
+    values: Object.fromEntries(tasks.map((task) => [task.id, getTaskDatesForMonth(task, year, monthIndex).length ? unitValue : 0]))
   };
 }
 
@@ -559,8 +574,8 @@ function childSummary(db, childId, month = isoDateLocal().slice(0, 7), options =
   const lost = missed.reduce((sum, entry) => sum + entry.value, 0) + penaltyLost;
   const settings = db.childrenSettings.find((item) => item.childId === childId) || {};
   const pointsAvailable = Math.max(0, valueMap.allowance - lost);
-  const rewardUnits = Math.max(0, Number(settings.rewardUnits || 0));
-  const rewardAmount = valueMap.allowance ? Math.floor((pointsAvailable / valueMap.allowance) * rewardUnits) : 0;
+  const rewardUnits = valueMap.allowance;
+  const rewardAmount = Math.round(pointsAvailable * 100) / 100;
   const closed = db.monthClosings.find((closing) => closing.childId === childId && closing.month === month);
   return {
     totalPoints: valueMap.allowance,
@@ -573,7 +588,7 @@ function childSummary(db, childId, month = isoDateLocal().slice(0, 7), options =
     penaltyLost,
     pointsLost: lost,
     pointsAvailable,
-    reward: { type: settings.rewardType || "robux", amount: rewardAmount, target: rewardUnits },
+    reward: { type: "brl", amount: rewardAmount, target: rewardUnits },
     closed: options.skipClosing ? null : closed || null,
     progress: progressForMonth(db, childId, month, valueMap.allowance)
   };
@@ -668,7 +683,7 @@ async function routeApi(req, res) {
         ...publicUser(child),
         settings: db.childrenSettings.find((setting) => setting.childId === child.id) || {
           monthlyPoints: 0,
-          rewardType: "robux",
+          rewardType: "brl",
           rewardUnits: 0,
           robloxUsername: "",
           pointsPenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES
@@ -772,9 +787,9 @@ async function routeApi(req, res) {
       db.users.push(child);
       db.childrenSettings.push({
         childId: child.id,
-        monthlyPoints: Math.max(0, Number(body.monthlyPoints || 1000)),
-        rewardType: ["robux", "custom", "screen_time"].includes(body.rewardType) ? body.rewardType : "robux",
-        rewardUnits: Math.max(0, Number(body.rewardUnits || 400)),
+        monthlyPoints: Math.max(0, Number(body.monthlyPoints ?? 1000)),
+        rewardType: "brl",
+        rewardUnits: Math.max(0, Number(body.monthlyPoints ?? 1000)),
         robloxUsername: String(body.robloxUsername || "").trim().slice(0, 50),
         pointsPenaltyPer10Minutes: Math.max(0, Number(body.pointsPenaltyPer10Minutes || DEFAULT_PHONE_PENALTY_PER_10_MINUTES))
       });
@@ -792,12 +807,16 @@ async function routeApi(req, res) {
       const body = await readBody(req);
       let setting = db.childrenSettings.find((item) => item.childId === childId);
       if (!setting) {
-        setting = { childId, monthlyPoints: 0, rewardType: "robux", rewardUnits: 0, robloxUsername: "", pointsPenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES };
+        setting = { childId, monthlyPoints: 0, rewardType: "brl", rewardUnits: 0, robloxUsername: "", pointsPenaltyPer10Minutes: DEFAULT_PHONE_PENALTY_PER_10_MINUTES };
         db.childrenSettings.push(setting);
       }
-      if (body.monthlyPoints !== undefined) setting.monthlyPoints = Math.max(0, Number(body.monthlyPoints || 0));
-      if (body.rewardType !== undefined && ["robux", "custom", "screen_time"].includes(body.rewardType)) setting.rewardType = body.rewardType;
-      if (body.rewardUnits !== undefined) setting.rewardUnits = Math.max(0, Number(body.rewardUnits || 0));
+      if (body.monthlyPoints !== undefined) {
+        const monthlyPoints = Number(body.monthlyPoints);
+        if (!Number.isFinite(monthlyPoints) || monthlyPoints < 0) return sendJson(res, 400, { error: "Informe uma meta mensal válida, maior ou igual a zero." });
+        setting.monthlyPoints = Math.round(monthlyPoints * 100) / 100;
+      }
+      setting.rewardType = "brl";
+      setting.rewardUnits = setting.monthlyPoints;
       if (body.robloxUsername !== undefined) setting.robloxUsername = String(body.robloxUsername || "").trim().slice(0, 50);
       if (body.pointsPenaltyPer10Minutes !== undefined) setting.pointsPenaltyPer10Minutes = Math.max(0, Number(body.pointsPenaltyPer10Minutes || 0));
       addAudit(db, responsible.id, "child_settings_updated", { childId, monthlyPoints: setting.monthlyPoints, rewardType: setting.rewardType, rewardUnits: setting.rewardUnits });
@@ -836,13 +855,15 @@ async function routeApi(req, res) {
       const body = await readBody(req);
       const targetUser = db.users.find((item) => item.id === body.userId);
       const password = String(body.password || "");
-      if (!targetUser || password.length < 4) return sendJson(res, 400, { error: "Usuário ou senha inválida." });
+      const reset = body.reset === true;
+      if (reset && !isAdmin(responsible)) return sendJson(res, 403, { error: "Apenas administradores podem redefinir senhas." });
+      if (!targetUser || (!reset && password.length < 4)) return sendJson(res, 400, { error: "Usuário ou senha inválida." });
       if (!isAdmin(responsible) && targetUser.role !== "child") {
         return sendJson(res, 403, { error: "Apenas administradores podem resetar qualquer senha." });
       }
-      targetUser.passwordHash = hashPassword(password);
+      targetUser.passwordHash = reset ? null : hashPassword(password);
       db.sessions = db.sessions.filter((session) => session.userId !== targetUser.id);
-      addAudit(db, responsible.id, "password_changed", { userId: targetUser.id });
+      addAudit(db, responsible.id, reset ? "password_reset" : "password_changed", { userId: targetUser.id });
       await writeDb(db);
       return sendJson(res, 200, { user: publicUser(targetUser) });
     }
@@ -922,13 +943,20 @@ async function routeApi(req, res) {
   }
 }
 
+// Serialize state operations so simultaneous requests cannot overwrite newer data.
+let apiQueue = Promise.resolve();
+
 const server = http.createServer((req, res) => {
   if (req.url === "/health") {
     sendJson(res, 200, { ok: true, storage: pool ? "postgres" : "json" });
     return;
   }
   if (req.url.startsWith("/api/")) {
-    routeApi(req, res);
+    apiQueue = apiQueue.then(() => routeApi(req, res)).catch((error) => {
+      console.error("Falha na requisição:", error);
+      if (!res.headersSent) sendJson(res, 500, { error: "Não foi possível salvar ou carregar os dados." });
+      else res.end();
+    });
   } else {
     routeStatic(req, res);
   }

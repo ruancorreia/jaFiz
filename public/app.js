@@ -26,13 +26,8 @@ const iconLabels = {
 };
 let state = { view: "dashboard", data: null, me: null };
 
-const points = (value) => `${Math.round(Number(value || 0)).toLocaleString("pt-BR")} pts`;
-const rewardLabel = (reward) => {
-  const amount = Math.floor(Number(reward?.amount || 0));
-  if (reward?.type === "robux") return `${amount.toLocaleString("pt-BR")} Robux`;
-  if (reward?.type === "screen_time") return `${amount.toLocaleString("pt-BR")} min de tela`;
-  return `${amount.toLocaleString("pt-BR")} recompensas`;
-};
+const points = (value) => `${Number(value || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} pts`;
+const rewardLabel = (reward) => Number(reward?.amount || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const isAdmin = () => state.me?.role === "admin";
 const roleLabel = (role) => ({
   admin: "Admin",
@@ -81,6 +76,18 @@ async function loadApp() {
   else renderResponsible();
 }
 
+
+function uiIcon(name) {
+  const paths = {
+    dashboard: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+    tasks: '<path d="m3 6 2 2 4-4M3 13l2 2 4-4M3 20l2 2 4-4M13 6h8M13 13h8M13 20h8"/>',
+    family: '<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 4a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 6"/>',
+    analysis: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M8 15h2M14 15h2"/>',
+    logout: '<path d="M9 3H4v18h5M14 7l5 5-5 5M8 12h12"/>'
+  };
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.dashboard}</svg>`;
+}
+
 async function renderLogin() {
   const usersPayload = await api("/api/users");
   app.innerHTML = "";
@@ -96,10 +103,10 @@ async function renderLogin() {
         </div>
         <form class="login-form">
           <div>
-            <h2>Entrar</h2>
-            <p class="page-title p">Escolha seu nome. No primeiro acesso você cria sua senha.</p>
+            <div class="login-mark">✓</div><h2>Acesse o JaFiz</h2>
+            <p class="page-title p">Selecione seu perfil para continuar. No primeiro acesso, crie sua senha.</p>
           </div>
-          <label class="field">
+          <div class="profile-options" role="group" aria-label="Selecione seu perfil"></div><label class="field login-user-select">
             <span>Usuário</span>
             <select name="name"></select>
           </label>
@@ -111,7 +118,7 @@ async function renderLogin() {
             <span>Criar senha</span>
             <input name="nextPassword" type="password" autocomplete="new-password">
           </label>
-          <button class="primary" type="submit">Entrar</button>
+          <button class="primary" type="submit">Entrar no JaFiz →</button><p class="login-help">Esqueceu a senha? Solicite a redefinição ao administrador.</p>
           <div class="error" role="alert"></div>
         </form>
       </section>
@@ -125,10 +132,25 @@ async function renderLogin() {
     option.dataset.needsPassword = user.needsPassword;
     select.appendChild(option);
   });
+  const profiles = view.querySelector('.profile-options');
+  usersPayload.users.forEach((user) => {
+    const button = el(`<button type="button" class="profile-option"><span class="avatar">${escapeHtml(user.name.slice(0,2).toUpperCase())}</span><span><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(roleLabel(user.role))}</small></span><span class="profile-radio" aria-hidden="true"></span></button>`);
+    button.addEventListener('click', () => { select.value = user.name; syncPasswordMode(); });
+    button.dataset.name = user.name;
+    profiles.append(button);
+  });
   const syncPasswordMode = () => {
+    profiles.querySelectorAll('button').forEach(button => { const active=button.dataset.name === select.value; button.classList.toggle('selected',active); button.setAttribute('aria-pressed',String(active)); });
     const needs = select.selectedOptions[0]?.dataset.needsPassword === "true";
     view.querySelector(".first-password").hidden = !needs;
     view.querySelector(".password-field").hidden = needs;
+    const current = view.querySelector("[name=password]");
+    const next = view.querySelector("[name=nextPassword]");
+    current.disabled = needs;
+    current.required = !needs;
+    next.disabled = !needs;
+    next.required = needs;
+    next.minLength = 4;
   };
   select.addEventListener("change", syncPasswordMode);
   syncPasswordMode();
@@ -222,8 +244,9 @@ function renderChild() {
           <div class="score"><span>Pendentes</span><strong>${summary.pending}</strong></div>
         </div>
       </section>
-      ${renderProgressChart(child, "Sua evolução no mês")}
-      <section class="task-board"></section>
+      <section class="child-balance"><span>Seu saldo no mês</span><strong>${points(summary.pointsAvailable ?? summary.totalPoints)} <small>/ ${points(summary.totalPoints)}</small></strong><div class="metric-progress"><i style="width:${Math.max(0,Math.min(100,summary.totalPoints ? Number(summary.pointsAvailable ?? summary.totalPoints)/summary.totalPoints*100 : 0))}%"></i></div><p>1 ponto = R$ 1,00 · Continue cuidando dos seus combinados!</p></section>
+      <div class="child-section-title"><h2>Suas tarefas de hoje</h2><span>${tasks.length} atividades</span></div><section class="task-board"></section>
+      <details class="child-evolution"><summary>Sua evolução no mês</summary>${renderProgressChart(child, "Sua evolução no mês")}</details>
       ${renderChildHistory(child)}
     </main>
   `);
@@ -323,10 +346,10 @@ function renderResponsible() {
     <main class="layout">
       <aside class="sidebar">
         <div class="brand">JaFiz</div>
-        <button class="nav-button active" data-view="dashboard">Painel</button>
-        <button class="nav-button" data-view="tasks">Tarefas</button>
-        <button class="nav-button" data-view="family">Família</button>
-        <button class="nav-button logout">Sair</button>
+        <button class="nav-button active" data-view="dashboard">${uiIcon("dashboard")}<span>Painel</span></button>
+        <button class="nav-button" data-view="tasks">${uiIcon("tasks")}<span>Tarefas</span></button>
+        <button class="nav-button" data-view="family">${uiIcon("family")}<span>Família</span></button><button class="nav-button" data-view="analysis">${uiIcon("analysis")}<span>Evolução</span></button>
+        <div class="sidebar-user"><span class="avatar">${escapeHtml(state.me.name.slice(0,2).toUpperCase())}</span><div><strong>${escapeHtml(state.me.name)}</strong><small>${escapeHtml(roleLabel(state.me.role))}</small></div></div><button class="nav-button logout">${uiIcon("logout")}<span>Sair</span></button>
       </aside>
       <section class="main">
         <div class="topbar">
@@ -340,10 +363,10 @@ function renderResponsible() {
           </div>
         </div>
         <div class="cards">
-          <div class="metric"><span>Meta mensal</span><strong>${points(summary.totalPoints)}</strong></div>
-          <div class="metric"><span>Recompensa prevista</span><strong>${rewardLabel(summary.reward)}</strong></div>
-          <div class="metric"><span>Pontos por tarefa</span><strong>${points(summary.taskValue)}</strong></div>
-          <div class="metric"><span>Pendentes</span><strong>${summary.pending || 0}</strong></div>
+          <div class="metric"><span>Meta mensal de pontos</span><strong>${points(summary.pointsAvailable ?? summary.totalPoints)} <small>/ ${points(summary.totalPoints)}</small></strong><div class="metric-progress"><i style="width:${Math.max(0,Math.min(100,Number(summary.totalPoints) ? Number(summary.pointsAvailable ?? summary.totalPoints)/summary.totalPoints*100 : 0))}%"></i></div><p>Saldo disponível no mês</p></div>
+          <div class="metric"><span>Recompensa prevista</span><strong>${rewardLabel(summary.reward)}</strong><p>Conversão: 1 ponto = R$ 1,00</p></div>
+          <div class="metric"><span>Valor por atividade</span><strong>${rewardLabel({amount:summary.taskValue})}</strong><p>${points(summary.totalPoints)} ÷ ${summary.totalOccurrences || 0} atividades mensais</p></div>
+          <div class="metric metric-pending"><span>Pendentes de validação</span><strong>${summary.pending || 0}</strong><p>${summary.pending ? "Aguardando sua aprovação" : "Tudo em dia"}</p></div>
         </div>
         <div class="content"></div>
       </section>
@@ -355,6 +378,7 @@ function renderResponsible() {
       state.view = button.dataset.view;
       shell.querySelectorAll(".nav-button[data-view]").forEach((item) => item.classList.toggle("active", item === button));
       renderResponsibleContent(shell.querySelector(".content"));
+      window.scrollTo({top:0});
     });
   });
   shell.querySelector(".logout").addEventListener("click", logout);
@@ -365,6 +389,15 @@ function renderResponsible() {
 }
 
 function renderResponsibleContent(container) {
+  const titles = {dashboard:['Painel dos responsáveis','Acompanhe os combinados e as aprovações da família.'],tasks:['Gestão de tarefas','Organize atividades, horários e dias da rotina.'],family:['Família e administração','Gerencie os perfis, as metas e os acessos.'],analysis:['Evolução e calendário','Acompanhe a constância e o histórico do mês.']};
+  const title=titles[state.view] || titles.dashboard;
+  const main=container.closest('.main');
+  main.querySelector('h1').textContent=title[0];
+  main.querySelector('.page-title p').textContent=title[1];
+  main.querySelector('.topbar .row-actions').hidden=state.view !== 'dashboard';
+  main.querySelector('.cards').hidden=['tasks','family'].includes(state.view);
+  if(state.view === 'analysis') {state.dashboardTab='analysis'; return renderDashboardView(container);}
+  if(state.view === 'dashboard' && state.dashboardTab === 'analysis') state.dashboardTab='daily';
   if (state.view === "tasks") return renderTasksView(container);
   if (state.view === "family") return renderFamilyView(container);
   return renderDashboardView(container);
@@ -402,7 +435,16 @@ function renderDashboardView(container) {
           <h2>Resumo do mês</h2>
           ${state.data.children.map((child) => `
             <p><strong>${escapeHtml(child.name)}</strong></p>
-            <p>Meta: ${points(child.summary.totalPoints)}</p>
+            <details class="goal-settings"><summary>Editar meta mensal</summary><form class="monthly-goal-form" data-id="${child.id}">
+              <label class="field"><span>Meta mensal de ${escapeHtml(child.name)} (pontos)</span><input name="monthlyPoints" type="number" min="0" step="0.01" required value="${child.settings.monthlyPoints ?? 0}"></label>
+              <p>1 ponto = R$ 1,00. Cada repetição no calendário conta como uma atividade.</p>
+              <p class="monthly-goal-preview" aria-live="polite"></p>
+              <button class="secondary" type="submit">Salvar meta e recalcular</button>
+              <p class="error" role="alert"></p>
+            </form></details>
+            <p>Atividades previstas no mês: ${child.summary.totalOccurrences}</p>
+            <p>Valor por atividade: ${rewardLabel({ amount: child.summary.taskValue })} (${points(child.summary.taskValue)})</p>
+            <p class="field-hint">Valores arredondados para exibição.</p>
             <p>Pontos perdidos: ${points(child.summary.pointsLost)}</p>
             <p>Recompensa: ${rewardLabel(child.summary.reward)}</p>
             ${renderRewardClosing(child)}
@@ -415,6 +457,71 @@ function renderDashboardView(container) {
       </div>
     </div>
   `;
+  const workspace = container.querySelector(".workspace");
+  const main = workspace.querySelector(".main-stack");
+  const side = workspace.querySelector(".side-stack");
+  const blocks = [...side.children];
+  const summary = blocks.shift();
+  const audit = blocks.pop();
+  const tabs = el(`<div class="dashboard-tabs" role="tablist" aria-label="Informações do painel">
+    <button id="tab-daily" role="tab" aria-controls="panel-daily" data-tab="daily">Dia a dia</button>
+    <button id="tab-analysis" role="tab" aria-controls="panel-analysis" data-tab="analysis">Evolução e calendário</button>
+    <button id="tab-history" role="tab" aria-controls="panel-history" data-tab="history">Auditoria</button>
+  </div>`);
+  const daily = el('<section id="panel-daily" role="tabpanel" aria-labelledby="tab-daily" class="dashboard-daily"></section>');
+  const analysis = el('<section id="panel-analysis" role="tabpanel" aria-labelledby="tab-analysis" class="dashboard-analysis"></section>');
+  const history = el('<section id="panel-history" role="tabpanel" aria-labelledby="tab-history"></section>');
+  summary.classList.add("monthly-summary");
+  const heading=el('<div class="panel-heading approvals-heading"><div><h2>Aprovações do dia a dia</h2><p>Confira as atividades e valide os combinados.</p></div><span class="pill status-pending">'+state.data.completions.filter(item=>item.status==='pending').length+' pendentes</span></div>');
+  main.insertBefore(heading, main.firstChild);
+  daily.append(main, summary);
+  analysis.append(...blocks);
+  history.append(audit);
+  container.replaceChildren(tabs, daily, analysis, history);
+  const activateTab = (name) => {
+    state.dashboardTab = name;
+    [daily, analysis, history].forEach((panel) => { panel.hidden = panel.id !== `panel-${name}`; });
+    tabs.querySelectorAll("[role=tab]").forEach((button) => {
+      const active = button.dataset.tab === name;
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+  };
+  tabs.querySelectorAll("button").forEach((button, index, buttons) => {
+    button.addEventListener("click", () => activateTab(button.dataset.tab));
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+      activateTab(buttons[next].dataset.tab);
+      buttons[next].focus();
+    });
+  });
+  activateTab(["daily", "analysis", "history"].includes(state.dashboardTab) ? state.dashboardTab : "daily");
+  container.querySelectorAll(".monthly-goal-form").forEach((form) => {
+    const child = state.data.children.find((item) => item.id === form.dataset.id);
+    const input = form.elements.monthlyPoints;
+    const preview = () => {
+      const target = Number(input.value);
+      const count = child.summary.totalOccurrences;
+      form.querySelector(".monthly-goal-preview").textContent = input.value !== "" && Number.isFinite(target) && target >= 0
+        ? `${points(target)} ÷ ${count} atividades = ${rewardLabel({ amount: count ? target / count : 0 })} por atividade`
+        : "Informe uma meta válida.";
+    };
+    input.addEventListener("input", preview);
+    preview();
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button");
+      button.disabled = true;
+      try {
+        await api(`/api/children/${form.dataset.id}`, { method: "PUT", body: JSON.stringify({ monthlyPoints: Number(input.value) }) });
+        await loadApp();
+      } catch (error) {
+        form.querySelector(".error").textContent = error.message;
+      } finally { button.disabled = false; }
+    });
+  });
   const tbody = container.querySelector("tbody");
   const renderRows = () => {
     const rows = filteredDashboardRows(container).sort((a, b) => String(b.completedAt || "").localeCompare(String(a.completedAt || "")));
@@ -486,8 +593,8 @@ function completionRow(completion) {
 
 function renderPhoneRulePanel() {
   return `
-    <section class="panel">
-      <h2>Regra do celular</h2>
+    <details class="panel phone-rule-disclosure">
+      <summary>Registrar regra do celular</summary>
       <form class="phone-rule-form">
         <label class="field">
           <span>Criança</span>
@@ -504,7 +611,7 @@ function renderPhoneRulePanel() {
         <p class="phone-preview"></p>
         <button class="primary" type="submit">Registrar regra</button>
       </form>
-    </section>
+    </details>
   `;
 }
 
@@ -624,6 +731,7 @@ function renderAuditLog() {
     child_created: "Criança adicionada",
     child_settings_updated: "Regras financeiras editadas",
     password_changed: "Senha alterada",
+    password_reset: "Senha redefinida para o próximo acesso",
     completion_approved: "Tarefa aprovada",
     completion_rejected: "Tarefa reprovada",
     phone_rule_approved: "Celular aprovado",
@@ -648,15 +756,16 @@ function renderAuditLog() {
 
 function renderTasksView(container) {
   container.innerHTML = `
-    <div class="workspace">
+    <div class="workspace tasks-workspace">
       <section class="table-wrap">
         <table>
           <thead><tr><th>Tarefa</th><th>Criança</th><th>Dias</th><th>Limite</th><th>Valor</th><th>Ativa</th><th>Ações</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
-      <section class="panel">
+      <section class="panel task-editor">
         <h2 class="task-form-title">Nova tarefa</h2>
+        <p class="task-form-intro">Defina a atividade, o horário e os dias da rotina.</p>
         <form class="task-form">
           <input name="taskId" type="hidden">
           <label class="field full"><span>Criança</span><select name="childId">${state.data.children.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></label>
@@ -665,22 +774,21 @@ function renderTasksView(container) {
             <label class="field"><span>Horário limite</span><input name="dueTime" type="time" value="21:00" required></label>
             <label class="field"><span>Ícone</span><select name="icon">${Object.entries(iconLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label>
           </div>
-          <div class="form-grid">
-            <label class="field"><span>Peso financeiro</span><input name="weight" type="number" min="0.1" step="0.1" value="1"></label>
-            <label class="field"><span>Confirmação</span><select name="requiresChildConfirmation">
-              <option value="true">Criança marca, responsável aprova</option>
-              <option value="false">Responsável informa</option>
-            </select></label>
-          </div>
-          <label class="field full">
-            <span>Dias</span>
-            <div class="row-actions">
+          <fieldset class="confirmation-options">
+            <legend>Quem confirma a atividade?</legend>
+            <label class="confirmation-option"><input type="radio" name="requiresChildConfirmation" value="true" checked><span>Criança marca e responsável aprova</span></label>
+            <label class="confirmation-option"><input type="radio" name="requiresChildConfirmation" value="false"><span>Responsável informa</span></label>
+          </fieldset>
+          <fieldset class="task-days">
+            <legend>Dias da atividade</legend>
+            <p class="field-hint">Selecione os dias em que a tarefa deve acontecer.</p>
+            <div class="row-actions day-presets">
               <button class="ghost preset-weekdays" type="button">Dias úteis</button>
-              <button class="ghost preset-all" type="button">Todos</button>
-              <button class="ghost preset-clear" type="button">Específicos</button>
+              <button class="ghost preset-all" type="button">Todos os dias</button>
+              <button class="ghost preset-clear" type="button">Limpar</button>
             </div>
             <div class="days-grid">${weekdays.map(([key, label]) => `<button class="day-toggle" type="button" data-day="${key}">${label}</button>`).join("")}</div>
-          </label>
+          </fieldset>
           <label class="field full task-active" hidden>
             <span>Status</span>
             <select name="active">
@@ -688,7 +796,7 @@ function renderTasksView(container) {
               <option value="false">Inativa</option>
             </select>
           </label>
-          <div class="row-actions">
+          <div class="row-actions task-form-actions">
             <button class="primary task-submit" type="submit">Criar tarefa</button>
             <button class="ghost task-cancel" type="button" hidden>Cancelar edição</button>
           </div>
@@ -701,6 +809,7 @@ function renderTasksView(container) {
   const selectedDays = new Set(["mon", "tue", "wed", "thu", "fri"]);
   const syncDayButtons = () => form.querySelectorAll(".day-toggle").forEach((button) => {
     button.classList.toggle("active", selectedDays.has(button.dataset.day));
+    button.setAttribute("aria-pressed", String(selectedDays.has(button.dataset.day)));
   });
   const setSelectedDays = (days) => {
     selectedDays.clear();
@@ -712,7 +821,7 @@ function renderTasksView(container) {
     form.taskId.value = "";
     form.childId.disabled = false;
     form.active.value = "true";
-    form.weight.value = "1";
+
     form.requiresChildConfirmation.value = "true";
     setSelectedDays(["mon", "tue", "wed", "thu", "fri"]);
     container.querySelector(".task-form-title").textContent = "Nova tarefa";
@@ -725,7 +834,7 @@ function renderTasksView(container) {
     const owner = state.data.children.find((item) => item.id === task.childId);
     const row = el(`
       <tr>
-        <td data-label="Tarefa">${escapeHtml(task.title)}</td>
+        <td data-label="Tarefa"><span class="table-task-icon">${iconMap[task.icon] || iconMap.star}</span><strong>${escapeHtml(task.title)}</strong></td>
         <td data-label="Criança">${escapeHtml(owner?.name || "-")}</td>
         <td data-label="Dias">${task.days.map((day) => weekdays.find(([key]) => key === day)?.[1]).join(", ")}</td>
         <td data-label="Limite">${task.dueTime}</td>
@@ -742,7 +851,7 @@ function renderTasksView(container) {
       form.dueTime.value = task.dueTime;
       form.icon.value = task.icon || "star";
       form.active.value = String(task.active);
-      form.weight.value = task.weight || 1;
+
       form.requiresChildConfirmation.value = String(task.requiresChildConfirmation !== false);
       setSelectedDays(task.days);
       container.querySelector(".task-form-title").textContent = "Editar tarefa";
@@ -775,7 +884,7 @@ function renderTasksView(container) {
       title: data.get("title"),
       dueTime: data.get("dueTime"),
       icon: data.get("icon"),
-      weight: data.get("weight"),
+      weight: 1,
       requiresChildConfirmation: data.get("requiresChildConfirmation") === "true",
       days: [...selectedDays]
     };
@@ -801,14 +910,12 @@ function renderFamilyView(container) {
     <div class="workspace">
       <section class="panel">
         <h2>Crianças</h2>
+        <p>Conversão fixa: 1 ponto = R$ 1,00. A meta mensal de pontos define o valor máximo em reais.</p>
         ${state.data.children.map((child) => `
           <form class="child-settings" data-id="${child.id}">
             <p><strong>${escapeHtml(child.name)}</strong></p>
             <div class="form-grid">
-          <label class="field"><span>Meta mensal de pontos</span><input name="monthlyPoints" type="number" min="0" step="1" value="${child.settings.monthlyPoints || 0}"></label>
-          <label class="field"><span>Tipo de recompensa</span><select name="rewardType"><option value="robux" ${child.settings.rewardType === "robux" ? "selected" : ""}>Robux</option><option value="screen_time" ${child.settings.rewardType === "screen_time" ? "selected" : ""}>Tempo de tela</option><option value="custom" ${child.settings.rewardType === "custom" ? "selected" : ""}>Personalizada</option></select></label>
-          <label class="field"><span>Quantidade máxima</span><input name="rewardUnits" type="number" min="0" step="1" value="${child.settings.rewardUnits || 0}"></label>
-          <label class="field"><span>Usuário Roblox (referência)</span><input name="robloxUsername" maxlength="50" value="${escapeHtml(child.settings.robloxUsername || "")}" placeholder="Sem senha ou PIN"></label>
+          <label class="field"><span>Meta mensal de pontos</span><input name="monthlyPoints" type="number" min="0" step="0.01" value="${child.settings.monthlyPoints || 0}"></label>
           <label class="field"><span>Penalidade celular / 10 min</span><input name="pointsPenaltyPer10Minutes" type="number" min="0" step="1" value="${child.settings.pointsPenaltyPer10Minutes || 0}"></label>
               <label class="field"><span>Nova senha</span><input name="password" type="password" placeholder="Opcional"></label>
             </div>
@@ -819,9 +926,9 @@ function renderFamilyView(container) {
       <section class="panel">
         <h2>Adicionar criança</h2>
         <form class="new-child">
+          <p>Recompensa em reais: 1 ponto = R$ 1,00.</p>
           <label class="field"><span>Nome</span><input name="name" required></label>
-          <label class="field"><span>Meta mensal de pontos</span><input name="monthlyPoints" type="number" min="0" step="1" value="1000"></label>
-          <label class="field"><span>Recompensa máxima em Robux</span><input name="rewardUnits" type="number" min="0" step="1" value="400"></label>
+          <label class="field"><span>Meta mensal de pontos</span><input name="monthlyPoints" type="number" min="0" step="0.01" value="1000"></label>
           <label class="field"><span>Penalidade celular / 10 min</span><input name="pointsPenaltyPer10Minutes" type="number" min="0" step="1" value="10"></label>
           <button class="primary" type="submit">Adicionar</button>
         </form>
@@ -838,7 +945,7 @@ function renderFamilyView(container) {
         await api(`/api/children/${childId}`, {
           method: "PUT",
           body: JSON.stringify({
-            monthlyPoints: data.get("monthlyPoints"), rewardType: data.get("rewardType"), rewardUnits: data.get("rewardUnits"),
+            monthlyPoints: data.get("monthlyPoints"),
             robloxUsername: data.get("robloxUsername"), pointsPenaltyPer10Minutes: data.get("pointsPenaltyPer10Minutes")
           })
         });
@@ -859,7 +966,7 @@ function renderFamilyView(container) {
         method: "POST",
         body: JSON.stringify({
           name: data.get("name"),
-          monthlyPoints: data.get("monthlyPoints"), rewardType: "robux", rewardUnits: data.get("rewardUnits"),
+          monthlyPoints: data.get("monthlyPoints"),
           pointsPenaltyPer10Minutes: data.get("pointsPenaltyPer10Minutes")
         })
       });
@@ -871,13 +978,16 @@ function renderFamilyView(container) {
   container.querySelectorAll(".user-password-reset").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
+      const reset = event.submitter?.value === "reset";
+      if (reset && !confirm("Redefinir a senha? As sessões serão encerradas e o usuário criará uma nova senha no próximo acesso.")) return;
       const data = new FormData(form);
       try {
         await api("/api/password", {
           method: "POST",
-          body: JSON.stringify({ userId: form.dataset.id, password: data.get("password") })
+          body: JSON.stringify({ userId: form.dataset.id, password: data.get("password"), reset })
         });
         form.reset();
+        alert(reset ? "Senha redefinida. O usuário criará uma nova senha no próximo acesso." : "Senha alterada com sucesso.");
         if (form.dataset.id === state.me.id) {
           await renderLogin();
           return;
@@ -896,13 +1006,15 @@ function renderAdminUsersPanel() {
   return `
     <section class="panel">
       <h2>Administração de usuários</h2>
+      <p>Altere a senha ou permita que o usuário crie uma nova no próximo acesso. Ambas as ações encerram as sessões do usuário.</p>
       ${users.map((user) => `
         <form class="user-password-reset" data-id="${user.id}">
-          <p><strong>${escapeHtml(user.name)}</strong> <span class="pill">${escapeHtml(roleLabel(user.role))}</span></p>
+          <p><strong>${escapeHtml(user.name)}</strong> <span class="pill">${escapeHtml(roleLabel(user.role))}</span> — ${user.needsPassword ? "Aguardando criação de senha" : "Senha cadastrada"}</p>
           <div class="form-grid">
-            <label class="field"><span>Nova senha</span><input name="password" type="password" minlength="4" required placeholder="Mínimo 4 caracteres"></label>
+            <label class="field"><span>Nova senha</span><input name="password" type="password" minlength="4" required autocomplete="new-password" placeholder="Mínimo 4 caracteres"></label>
           </div>
-          <button class="secondary" type="submit">Resetar senha</button>
+          <button class="secondary" type="submit" value="change">Alterar senha</button>
+          <button class="secondary" type="submit" value="reset" formnovalidate>Redefinir para o próximo acesso</button>
         </form>
       `).join("<hr>")}
     </section>
