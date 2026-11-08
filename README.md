@@ -452,6 +452,3 @@ O CSS mantém regras anteriores e um bloco final de adaptação ao Stitch; a cas
 | Falha ao iniciar com PostgreSQL | Confira URL, acesso de rede, permissões e configuração SSL. |
 | Dados desaparecem na hospedagem | Confira persistência do disco ou configuração do banco; JSON em disco efêmero não é backup. |
 
-### Atualizar a documentação
-
-Quando adicionar um endpoint, registre método, acesso, entrada, resposta, erros e teste correspondente. Ao alterar cálculos ou design, atualize as seções 5 e 8. Não copie senhas, cookies, `DATABASE_URL` real ou dados pessoais para exemplos. Os arquivos `data/*.json`, `.env`, `node_modules/` e `.tmp-data*/` já são ignorados pelo Git.
