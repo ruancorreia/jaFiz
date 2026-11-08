@@ -1,48 +1,47 @@
 # Roadmap JaFiz
 
-## Fase 1 - Base familiar confiável
+Revisado em 08/11/2026. A [documentação técnica](docs/DOCUMENTACAO.md) descreve instalação e comportamento atual. Os itens futuros abaixo ainda não representam recursos disponíveis.
 
-- Persistência em banco gerenciado, como PostgreSQL no Render, para substituir o JSON local quando o uso da família virar rotina.
-- Migração de dados e backups automáticos, com exportação mensal de pontos, recompensas e histórico de tarefas.
-- Tela de edição completa de responsáveis, crianças, tarefas e combinações de calendário.
-- Registro de auditoria para saber quem aprovou, reprovou, editou ou alterou senha.
+## Já implementado
 
-## Fase 2 - Rotina e aprovação mais justas
+- Persistência JSON local e PostgreSQL opcional em estado JSONB.
+- Senhas persistidas, sessões e administração de alteração/redefinição de senha.
+- Cadastro de crianças, configurações e criação/edição/inativação de tarefas.
+- Meta mensal editável e rateio igual entre ocorrências previstas.
+- Conversão fixa de um ponto para um real, substituindo a recompensa em Robux.
+- Marcação de tarefas pela criança e aprovação/reprovação pelo responsável.
+- Regra do celular com registro e penalidade por blocos de dez minutos.
+- Fechamento mensal e estados de aprovação/entrega manual de recompensa.
+- Dashboard com filtros, calendário, evolução, relatório e auditoria recente.
+- Interface inspirada no Stitch, com navegação inferior e adaptação mobile.
+- Manifesto de serviço web no Render.
 
-- Justificativa de atraso enviada pela criança, com aprovação excepcional pelo responsável.
-- Tarefas com peso diferente, já que algumas são mais importantes do que outras, especialmente a regra do celular.
-- Bônus por sequência de dias cumpridos, sem apagar o cálculo financeiro principal.
-- Pausa planejada para férias, viagens, doença ou dias sem obrigação.
-- Fechamento mensal de recompensas, congelando pontos, quantidade de Robux e status de entrega.
+## Prioridade 1 — confiabilidade e segurança
 
-## Fase 3 - Experiência da criança
+- Isolar dados por família e restringir as coleções retornadas para crianças.
+- Proteger primeiro acesso com ativação, fortalecer política de senha e limitar tentativas.
+- Revisar cookie Secure, CSRF, validação de entrada e certificado PostgreSQL.
+- Versionar metas/agendas e bloquear alterações incompatíveis após fechamento.
+- Revisar o instante de fechamento para ocorrer após o término efetivo do mês.
+- Criar backups/restauração e migrações versionadas; controlar escrita entre instâncias.
+- Criar suíte automatizada de API, cálculos, permissões, persistência e frontend.
 
-- Avatar, níveis, medalhas e trilhas de progresso.
-- Tela diária mais visual, separando manhã, tarde e noite.
-- Feedback positivo quando a tarefa é aprovada.
-- Histórico simples para a criança entender o que ganhou, perdeu e por quê.
-- Missões especiais não recorrentes, como "arrumar o quarto hoje".
+## Prioridade 2 — rotina e experiência
 
-## Fase 4 - Dashboard dos responsáveis
+- Registro genérico de tarefa pelo responsável, coerente com a opção de confirmação.
+- Justificativa de atraso e aprovação excepcional.
+- Pausa por férias, viagem ou doença; tarefas não recorrentes.
+- Edição de nomes e gestão completa de responsáveis/perfis.
+- Exportação de relatórios e histórico financeiro.
+- Avatares, medalhas e reforço positivo sem alterar indevidamente o cálculo financeiro.
+- Auditoria de acessibilidade e usabilidade em desktop e dispositivos móveis.
 
-- Filtros por criança, período, status e tipo de tarefa.
-- Calendário mensal com tarefas cumpridas, pendentes, atrasadas e aprovadas.
-- Relatórios por tarefa para identificar onde a rotina está travando.
-- Aprovação rápida por dia, criança ou categoria.
-- Configuração de regras financeiras por criança.
+## Prioridade 3 — operação e produto
 
-## Fase 5 - Notificações e segurança
+- Notificações e lembretes.
+- Recuperação de senha com fluxo seguro e gestão de sessões pelo próprio usuário.
+- Ambientes separados de desenvolvimento, testes e produção.
+- Logs estruturados, métricas, documentação OpenAPI e pipeline de validação/deploy.
+- Política familiar e orientações de privacidade e entrega de recompensas.
 
-- Lembretes antes do horário limite.
-- Avisos para responsáveis quando uma tarefa for marcada ou atrasar.
-- Recuperação de senha com fluxo seguro para responsáveis.
-- Controle de sessão, troca de senha própria e encerramento de sessões antigas.
-- Perfis com permissões mais claras, incluindo responsável principal e responsável auxiliar.
-
-## Fase 6 - Produto hospedado
-
-- Deploy automatizado no Render com variáveis de ambiente documentadas.
-- Ambiente de produção e ambiente de testes.
-- Testes automatizados de API e fluxo principal no navegador.
-- Observabilidade básica: logs estruturados, erros e métricas de uso.
-- Página de política familiar, explicando regras de pontos, recompensas e entrega mediada por responsável.
+O sistema atual não efetua pagamentos bancários. Qualquer integração futura exige um projeto próprio de segurança, consentimento e conciliação.
